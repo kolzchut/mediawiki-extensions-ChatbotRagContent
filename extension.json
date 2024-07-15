@@ -14,6 +14,9 @@
 	"AutoloadNamespaces": {
 		"MediaWiki\\Extension\\ChatbotRagContent\\": "src/"
 	},
+	"JobClasses": {
+		"ragUpdate": "MediaWiki\\Extension\\ChatbotRagContent\\RagUpdateJob"
+	},
 	"config": {
 		"ChatbotRagContentPingURL": {
 			"description": "URL to ping when content updates.",
@@ -30,11 +33,13 @@
 		}
 	},
 	"Hooks": {
-		"BeforePageDisplay": "ChatbotRagContentHooks"
+		"RevisionDataUpdates": "ChatbotRagContentHooks",
+		"PageDeletionDataUpdates": "ChatbotRagContentHooks"
+
 	},
 	"RestRoutes": [
 		{
-			"path": "/chatbotragcontent/v0/get_content/{page_id}",
+			"path": "/cbragcontent/v0/page_id/{identifier}",
 			"class": "MediaWiki\\Extension\\ChatbotRagContent\\RestApiGetContent",
 			"services": [
 				"PermissionManager",

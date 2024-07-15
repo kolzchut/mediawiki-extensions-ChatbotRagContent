@@ -19,21 +19,57 @@
 
 namespace MediaWiki\Extension\ChatbotRagContent;
 
-class Hooks implements \MediaWiki\Hook\BeforePageDisplayHook {
+
+use JobQueueGroup;
+use MediaWiki\MediaWikiServices;
+use Title;
+
+class Hooks implements
+	\MediaWiki\Storage\Hook\RevisionDataUpdatesHook,
+	\MediaWiki\Page\Hook\PageDeletionDataUpdatesHook {
 
 	/**
-	 * @see https://www.mediawiki.org/wiki/Manual:Hooks/BeforePageDisplay
-	 * @param \OutputPage $out
-	 * @param \Skin $skin
+	 * @inheritDoc
 	 */
-	public function onBeforePageDisplay( $out, $skin ): void {
-		$config = $out->getConfig();
-		/*
-		if ( $config->get( 'BoilerPlateVandalizeEachPage' ) ) {
-			$out->addModules( 'oojs-ui-core' );
-			$out->addHTML( \Html::element( 'p', [], 'BoilerPlate was here' ) );
+	public function onRevisionDataUpdates( $title, $renderedRevision, &$updates ) {
+		$this->pushNewJob( $title );
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function onPageDeletionDataUpdates( $title, $revision, &$updates )	{
+		$this->pushNewJob( $title );
+	}
+
+	private static function isRelevantTitle( $title ) {
+		$services =  MediaWikiServices::getInstance();
+		$url = $services->getMainConfig()->get( 'ChatbotRagContentPingURL' );
+
+		// @todo: other checks	, such as namespaces
+		return $url && $title->isWikitextPage();
+	}
+
+	/**
+	 * @param Title $title
+	 */
+	private function pushNewJob( $title ): bool
+	{
+		if ( !self::isRelevantTitle( $title ) ) {
+			return false;
 		}
-		*/
+
+		if ( method_exists( MediaWikiServices::class, 'getJobQueueGroup' ) ) {
+			// MW 1.37+
+			$jobQueue = MediaWikiServices::getInstance()->getJobQueueGroup();
+		} else {
+			$jobQueue = JobQueueGroup::singleton();
+		}
+
+		$job = new RagUpdateJob( $title, [ 'rev_id' => $title->getLatestRevID() ] );
+		$jobQueue->push( $job );
+
+		return true;
 	}
 
 }

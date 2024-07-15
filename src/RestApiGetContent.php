@@ -7,7 +7,9 @@ use DOMDocument;
 use DOMXPath;
 use MediaWiki\Extension\ArticleContentArea\ArticleContentArea;
 use MediaWiki\Extension\ArticleType\ArticleType;
+use MediaWiki\MediaWikiServices;
 use MediaWiki\Revision\RevisionRenderer;
+use MediaWiki\Storage\RevisionRecord;
 use Symfony\Component\CssSelector\CssSelectorConverter;
 use MediaWiki\Permissions\PermissionManager;
 use MediaWiki\Rest\LocalizedHttpException;
@@ -19,6 +21,7 @@ use Wikimedia\Message\MessageValue;
 use Wikimedia\Message\ParamType;
 use Wikimedia\Message\ScalarParam;
 use Wikimedia\ParamValidator\ParamValidator;
+use WikiPage;
 
 /**
  * Example class to echo a path parameter
@@ -40,7 +43,20 @@ class RestApiGetContent extends SimpleHandler {
 	 */
 	private $title = null;
 
-	private DOMDocument $dom;
+	/**
+	 * @var WikiPage|null
+	 */
+	private $wikiPage = null;
+
+	/**
+	 * @var RevisionRecord|null
+	 */
+	private $revisionRecord	= null;
+
+	/**
+	 * @var DOMDocument
+	 */
+	private $dom;
 
 
 	public function __construct(
@@ -58,9 +74,28 @@ class RestApiGetContent extends SimpleHandler {
 	 */
 	private function getTitle() {
 		if ( $this->title === null ) {
-			$this->title = Title::newFromID( $this->getValidatedParams()['page_id'] ) ?? false;
+			$this->title = Title::newFromID( $this->getValidatedParams()['identifier'] ) ?? false;
 		}
 		return $this->title;
+	}
+
+	private function getWikiPage() {
+		if ( $this->wikiPage === null ) {
+			if ( method_exists( MediaWikiServices::class, 'getWikiPageFactory' ) ) {
+				// MW 1.36+
+				$this->wikiPage = MediaWikiServices::getInstance()->getWikiPageFactory()->newFromTitle( $this->getTitle() );
+			} else {
+				$this->wikiPage = WikiPage::factory( $this->getTitle() );
+			}
+		}
+		return $this->wikiPage;
+	}
+
+	private function getRevisionRecord() {
+		if ( $this->revisionRecord === null ) {
+			$this->revisionRecord = $this->getWikiPage()->getRevisionRecord();
+		}
+		return $this->revisionRecord;
 	}
 
 	/** @inheritDoc */
@@ -82,13 +117,13 @@ class RestApiGetContent extends SimpleHandler {
 			);
 		}
 
-		return $this->getPageData( $titleObj );
+		return $this->getPageData();
 
 	}
 	/** @inheritDoc */
 	public function getParamSettings() {
 		return [
-			'page_id' => [
+			'identifier' => [
 				self::PARAM_SOURCE => 'path',
 				ParamValidator::PARAM_TYPE => 'integer',
 				ParamValidator::PARAM_REQUIRED => true,
@@ -138,10 +173,10 @@ class RestApiGetContent extends SimpleHandler {
 	 */
 	function reformatLinks(string $html): string
 	{
-		return preg_replace_callback('/<a\s+.*?href="([^"]+)"[^>]*>([^<]*)<\/a>/i', 'reformatLinksCallback', $html);
+		return preg_replace_callback('/<a\s+.*?href="([^"]+)"[^>]*>([^<]*)<\/a>/i', 'self::reformatLinksCallback', $html);
 	}
 
-	function reformatLinksCallback($matches): string
+	static function reformatLinksCallback($matches): string
 	{
 		$url = str_replace('mailto:', '', $matches[1]);
 		return $matches[2] . ' (' . urldecode($url) . ')';
@@ -210,11 +245,9 @@ class RestApiGetContent extends SimpleHandler {
 		}
 	}
 
-	function getOnlyVisibleCategories( \WikiPage $wikiPage ) {
-		// @todo only get visible categories, by somehow subtracting $hiddenCategories
-
-		$categories = iterator_to_array( $wikiPage->getCategories() );
-		$hiddenCategories = $wikiPage->getHiddenCategories();
+	function getOnlyVisibleCategories() {
+		$categories = iterator_to_array( $this->getWikiPage()->getCategories() );
+		$hiddenCategories = $this->getWikiPage()->getHiddenCategories();
 		$visibleCategories = array_diff( $categories, $hiddenCategories );
 
 		$plainNames = [];
@@ -225,21 +258,19 @@ class RestApiGetContent extends SimpleHandler {
 		return $plainNames;
 	}
 
-	function getPageData( Title $title ) {
-		// Ignore non-Hebrew pages
-		if ( $title->getPageLanguage()->getCode() !== 'he') {
+	function getPageData() {
+		$contentLanguage = MediaWikiServices::getInstance()->getContentLanguage();
+		// Ignore pages in a language other than the wiki's content language
+		if ( $this->getTitle()->getPageLanguage()->getCode() !== $contentLanguage->getCode() ) {
 			// @todo decide on error format
 			return 'error';
 		};
 
-		$wikiPage = new \WikiPage( $title );
-		$pageContent = $wikiPage->getContent();
-		$renderedRevision = $this->revisionRenderer->getRenderedRevision( $wikiPage->getRevisionRecord() );
+		$renderedRevision = $this->revisionRenderer->getRenderedRevision( $this->getRevisionRecord() );
 		$parserOutput = $renderedRevision->getRevisionParserOutput();
-		$pageHtml = $parserOutput->getText( [ 'allowTOC' => false, 'enableSectionEditLinks' => false, 'unwrap' => true ] );
+		$pageHtml = $parserOutput->getText( [ 'allowTOC' => false, 'enableSectionEditLinks' => false ] );
 
-		// @todo only get visible categories, by somehow subtracting $hiddenCategories
-		$categories = $this->getOnlyVisibleCategories( $wikiPage );
+		$categories = $this->getOnlyVisibleCategories();
 
 		// Remove comments before further processing using DOM
 		$pageHtml = preg_replace('/<!--[\s\S]*?-->/', '', $pageHtml);
@@ -251,6 +282,8 @@ class RestApiGetContent extends SimpleHandler {
 
 		// Remove the summary from the document
 		$this->removeElementsBySelector( '.article-summary');
+
+		$this->removeElementsBySelector( '.share-links' );
 
 		// Remove other useless elements
 		$this->removeElementsBySelector( '.toc-box');
@@ -265,20 +298,21 @@ class RestApiGetContent extends SimpleHandler {
 		$processedHtml = html_entity_decode($processedHtml, ENT_COMPAT | ENT_HTML401, 'UTF-8');
 		$mainContent = $this->convertHtmlToText($processedHtml);
 
-		$articleTypeCode = ArticleType::getArticleType( $title );
+		$articleTypeCode = ArticleType::getArticleType( $this->getTitle() );
 		$articleType = ArticleType::getReadableArticleTypeFromCode( $articleTypeCode, 2 );
-		$articleContentArea = ArticleContentArea::getArticleContentArea( $title ) ?? 'unknown';
+		$articleContentArea = ArticleContentArea::getArticleContentArea( $this->getTitle() ) ?? 'unknown';
 
 		return [
-			'id' => $wikiPage->getId(),
-			'title' => $title->getFullText(),
-			'url' => urldecode( $title->getFullURL() ),
+			'page_id' => $this->getWikiPage()->getId(),
+			'title' => $this->getTitle()->getFullText(),
+			'namespace' => $this->getTitle()->getNamespace(),
+			'url' => urldecode( $this->getTitle()->getFullURL() ),
 			'articleType' => $articleType,
 			'articleContentArea' => $articleContentArea,
 			'summary' => trim($summary),
 			'content' => trim($mainContent),
 			'contentHtml' => trim($processedHtml),
-			'categories' => implode(PHP_EOL, $categories)
+			'categories' => $categories
 		];
 	}
 
