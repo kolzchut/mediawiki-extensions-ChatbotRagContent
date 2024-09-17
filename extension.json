@@ -10,7 +10,7 @@
 	"requires": {
 		"MediaWiki": ">= 1.35.0"
 	},
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"AutoloadNamespaces": {
 		"MediaWiki\\Extension\\ChatbotRagContent\\": "src/"
 	},
@@ -24,7 +24,9 @@
 		},
 		"ChatbotRagContentNamespaces": {
 			"description": "Namespaces to notify about changes in",
-			"value": []
+			"value": [
+				0
+			]
 		}
 	},
 	"HookHandlers": {
@@ -34,7 +36,8 @@
 	},
 	"Hooks": {
 		"RevisionDataUpdates": "ChatbotRagContentHooks",
-		"PageDeletionDataUpdates": "ChatbotRagContentHooks"
+		"PageDeletionDataUpdates": "ChatbotRagContentHooks",
+		"PageMoveComplete": "ChatbotRagContentHooks"
 
 	},
 	"RestRoutes": [

@@ -30,6 +30,5 @@ The extension provides a MediaWiki REST API endpoint, in this form:
 
 ## Scenarios handled
 1. Pages updated
-2. New pages created directly in main namespace
-3. Pages moved to main namespace - TBD
-4. Pages moved out of main namespace - TBD
+2. New pages created directly in an allowed namespace
+3. Pages moved in/out of allowed namespaces

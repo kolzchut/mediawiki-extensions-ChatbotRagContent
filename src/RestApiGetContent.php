@@ -107,7 +107,7 @@ class RestApiGetContent extends SimpleHandler {
 	/** @inheritDoc */
 	public function run( $page_id ) {
 		$titleObj = $this->getTitle();
-		if ( !$titleObj || !$titleObj->getArticleID() ) {
+		if ( !$titleObj || !$titleObj->getArticleID() || !ChatbotRagContent::isRelevantTitle( $titleObj ) ) {
 			throw new LocalizedHttpException(
 				new MessageValue( 'rest-nonexistent-title',
 					[ new ScalarParam( ParamType::PLAINTEXT, $page_id ) ]

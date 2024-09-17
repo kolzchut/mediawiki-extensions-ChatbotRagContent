@@ -25,40 +25,43 @@ use Title;
 
 class Hooks implements
 	\MediaWiki\Storage\Hook\RevisionDataUpdatesHook,
-	\MediaWiki\Page\Hook\PageDeletionDataUpdatesHook
+	\MediaWiki\Page\Hook\PageDeletionDataUpdatesHook,
+	\MediaWiki\Hook\PageMoveCompleteHook
 {
 
 	/**
 	 * @inheritDoc
 	 */
 	public function onRevisionDataUpdates( $title, $renderedRevision, &$updates ) {
-		$this->pushNewJob( $title );
+		self::pushNewJob( $title );
 	}
 
 	/**
 	 * @inheritDoc
 	 */
 	public function onPageDeletionDataUpdates( $title, $revision, &$updates ) {
-		$this->pushNewJob( $title );
+		self::pushNewJob( $title );
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function onPageMoveComplete( $old, $new, $user, $pageid, $redirid, $reason, $revision ) {
+		$oldNamespaceAllowed = ChatbotRagContent::isAllowedNamespace( $old->getNamespace() );
+		$newNamespaceAllowed = ChatbotRagContent::isAllowedNamespace( $new->getNamespace() );
+
+		if ( $oldNamespaceAllowed | $newNamespaceAllowed ) {
+			// Page moved in or out of an allowed namespace
+			self::pushNewJob( Title::newFromLinkTarget( $new ), true );
+		}
 	}
 
 	/**
 	 * @param Title $title
-	 * @return bool
+	 * @param bool $ignoreNamespaceCheck
 	 */
-	private static function isRelevantTitle( Title $title ) {
-		$services = MediaWikiServices::getInstance();
-		$url = $services->getMainConfig()->get( 'ChatbotRagContentPingURL' );
-
-		// @todo: other checks	, such as namespaces
-		return $url && $title->isWikitextPage();
-	}
-
-	/**
-	 * @param Title $title
-	 */
-	private function pushNewJob( $title ): bool {
-		if ( !self::isRelevantTitle( $title ) ) {
+	private static function pushNewJob( $title, bool $ignoreNamespaceCheck = false ): bool {
+		if ( !ChatbotRagContent::isRelevantTitle( $title, $ignoreNamespaceCheck ) ) {
 			return false;
 		}
 
@@ -69,10 +72,9 @@ class Hooks implements
 			$jobQueue = JobQueueGroup::singleton();
 		}
 
-		$job = new RagUpdateJob( $title, [ 'rev_id' => $title->getLatestRevID() ] );
+		$job = new RagUpdateJob( $title );
 		$jobQueue->push( $job );
 
 		return true;
 	}
-
 }

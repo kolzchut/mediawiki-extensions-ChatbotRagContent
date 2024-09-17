@@ -32,21 +32,22 @@ use Title;
 class RagUpdateJob extends Job {
 
 	/** @inheritDoc */
-	public function __construct( Title $title, array $params ) {
-		parent::__construct( 'ragUpdate', $title, $params );
+	public function __construct( Title $title, array $params = [] ) {
+		parent::__construct( 'ragUpdate', $title, (array)$params );
 
 		$this->removeDuplicates = true;
 	}
 
-	/** @inheritDoc */
-	public function run() {
+	/** @inheritDoc
+	 * @throws \MWException
+	 */
+	public function run(): bool {
 		$services = MediaWikiServices::getInstance();
 		$url = $services->getMainConfig()->get( 'ChatbotRagContentPingURL' );
 
 		// Build data to append to request
 		$data = [
 			'page_id' => $this->getTitle()->getId(),
-			'rev_id' => $this->getParams()['rev_id'] ?? $this->getTitle()->getLatestRevID(),
 			'callback_uri' => $this->getRestApiUrl()
 		];
 
@@ -59,7 +60,7 @@ class RagUpdateJob extends Job {
 		$status = $request->execute();
 		if ( !$status->isOK() ) {
 			$this->error = 'http';
-			wfDebug( "No one got our ping at {$url}", 'ChatbotRagContent' );
+			wfDebug( "Pingback error: {$request->getStatus()}", 'ChatbotRagContent' );
 			return false;
 		}
 
