@@ -60,7 +60,7 @@ class RagUpdateJob extends Job {
 		$status = $request->execute();
 		if ( !$status->isOK() ) {
 			$this->error = 'http';
-			wfDebug( "Pingback error: {$request->getStatus()}", 'ChatbotRagContent' );
+			wfDebugLog( 'ChatbotRagContent', "Pingback error: {$request->getStatus()}" );
 			return false;
 		}
 
