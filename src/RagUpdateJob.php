@@ -20,7 +20,6 @@
 
 namespace MediaWiki\Extension\ChatbotRagContent;
 
-
 use Job;
 use MediaWiki\MediaWikiServices;
 use Title;
@@ -41,7 +40,7 @@ class RagUpdateJob extends Job {
 
 	/** @inheritDoc */
 	public function run() {
-		$services =  MediaWikiServices::getInstance();
+		$services = MediaWikiServices::getInstance();
 		$url = $services->getMainConfig()->get( 'ChatbotRagContentPingURL' );
 
 		// Build data to append to request
@@ -67,7 +66,12 @@ class RagUpdateJob extends Job {
 		return true;
 	}
 
-	function getRestApiUrl() {
+	/**
+	 * Compose a full URL to the REST API endpoint, so we can send it with the pingback
+	 *
+	 * @return string
+	 */
+	private function getRestApiUrl(): string {
 		$config = MediaWikiServices::getInstance()->getMainConfig();
 		$server = $config->get( 'Server' );
 		$path = $config->get( 'RestPath' );

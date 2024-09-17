@@ -19,14 +19,14 @@
 
 namespace MediaWiki\Extension\ChatbotRagContent;
 
-
 use JobQueueGroup;
 use MediaWiki\MediaWikiServices;
 use Title;
 
 class Hooks implements
 	\MediaWiki\Storage\Hook\RevisionDataUpdatesHook,
-	\MediaWiki\Page\Hook\PageDeletionDataUpdatesHook {
+	\MediaWiki\Page\Hook\PageDeletionDataUpdatesHook
+{
 
 	/**
 	 * @inheritDoc
@@ -38,12 +38,16 @@ class Hooks implements
 	/**
 	 * @inheritDoc
 	 */
-	public function onPageDeletionDataUpdates( $title, $revision, &$updates )	{
+	public function onPageDeletionDataUpdates( $title, $revision, &$updates ) {
 		$this->pushNewJob( $title );
 	}
 
-	private static function isRelevantTitle( $title ) {
-		$services =  MediaWikiServices::getInstance();
+	/**
+	 * @param Title $title
+	 * @return bool
+	 */
+	private static function isRelevantTitle( Title $title ) {
+		$services = MediaWikiServices::getInstance();
 		$url = $services->getMainConfig()->get( 'ChatbotRagContentPingURL' );
 
 		// @todo: other checks	, such as namespaces
@@ -53,8 +57,7 @@ class Hooks implements
 	/**
 	 * @param Title $title
 	 */
-	private function pushNewJob( $title ): bool
-	{
+	private function pushNewJob( $title ): bool {
 		if ( !self::isRelevantTitle( $title ) ) {
 			return false;
 		}

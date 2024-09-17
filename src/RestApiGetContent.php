@@ -2,19 +2,18 @@
 
 namespace MediaWiki\Extension\ChatbotRagContent;
 
-
 use DOMDocument;
 use DOMXPath;
 use MediaWiki\Extension\ArticleContentArea\ArticleContentArea;
 use MediaWiki\Extension\ArticleType\ArticleType;
 use MediaWiki\MediaWikiServices;
-use MediaWiki\Revision\RevisionRenderer;
-use MediaWiki\Storage\RevisionRecord;
-use Symfony\Component\CssSelector\CssSelectorConverter;
 use MediaWiki\Permissions\PermissionManager;
 use MediaWiki\Rest\LocalizedHttpException;
 use MediaWiki\Rest\SimpleHandler;
+use MediaWiki\Revision\RevisionRenderer;
+use MediaWiki\Storage\RevisionRecord;
 use RequestContext;
+use Symfony\Component\CssSelector\CssSelectorConverter;
 use Title;
 use User;
 use Wikimedia\Message\MessageValue;
@@ -30,7 +29,6 @@ class RestApiGetContent extends SimpleHandler {
 
 	/** @var PermissionManager */
 	private $permissionManager;
-
 
 	/** @var RevisionRenderer */
 	private $revisionRenderer;
@@ -58,7 +56,6 @@ class RestApiGetContent extends SimpleHandler {
 	 */
 	private $dom;
 
-
 	public function __construct(
 		PermissionManager $permissionManager,
 		RevisionRenderer $revisionRenderer
@@ -79,11 +76,17 @@ class RestApiGetContent extends SimpleHandler {
 		return $this->title;
 	}
 
+	/**
+	 * Get a wikipage record for this title
+	 * @return \WikiCategoryPage|\WikiFilePage|WikiPage|null
+	 * @throws \MWException
+	 */
 	private function getWikiPage() {
 		if ( $this->wikiPage === null ) {
 			if ( method_exists( MediaWikiServices::class, 'getWikiPageFactory' ) ) {
 				// MW 1.36+
-				$this->wikiPage = MediaWikiServices::getInstance()->getWikiPageFactory()->newFromTitle( $this->getTitle() );
+				$mwServices = MediaWikiServices::getInstance();
+				$this->wikiPage = $mwServices->getWikiPageFactory()->newFromTitle( $this->getTitle() );
 			} else {
 				$this->wikiPage = WikiPage::factory( $this->getTitle() );
 			}
@@ -91,6 +94,9 @@ class RestApiGetContent extends SimpleHandler {
 		return $this->wikiPage;
 	}
 
+	/**
+	 * @return \MediaWiki\Revision\RevisionRecord|RevisionRecord|null
+	 */
 	private function getRevisionRecord() {
 		if ( $this->revisionRecord === null ) {
 			$this->revisionRecord = $this->getWikiPage()->getRevisionRecord();
@@ -118,8 +124,8 @@ class RestApiGetContent extends SimpleHandler {
 		}
 
 		return $this->getPageData();
-
 	}
+
 	/** @inheritDoc */
 	public function getParamSettings() {
 		return [
@@ -142,15 +148,14 @@ class RestApiGetContent extends SimpleHandler {
 	 * @param string $html The HTML string to search.
 	 * @return string the re-formatted text
 	 */
-	function convertHtmlToText(string $html): string
-	{
+	private function convertHtmlToText( string $html ): string {
 		// Strip everything but links, which we will re-format
-		$text = strip_tags($html, '<a>');
-		$text = $this->reformatEmailAndPhoneLinks($text);
-		$text = $this->reformatLinks($text);
+		$text = strip_tags( $html, '<a>' );
+		$text = $this->reformatEmailAndPhoneLinks( $text );
+		$text = $this->reformatLinks( $text );
 		// Now strip the remaining tags, because who knows what's left
-		$text = strip_tags($text);
-		return trim($text);
+		$text = strip_tags( $text );
+		return trim( $text );
 	}
 
 	/**
@@ -160,9 +165,8 @@ class RestApiGetContent extends SimpleHandler {
 	 * @param string $html The HTML string to search.
 	 * @return string the re-formatted text
 	 */
-	function reformatEmailAndPhoneLinks(string $html): string
-	{
-		return preg_replace('/<a\s+.*?href="(?:mailto|tel):([^"]+)"[^>]*>\1<\/a>/i', '(\1)', $html);
+	private function reformatEmailAndPhoneLinks( string $html ): string {
+		return preg_replace( '/<a\s+.*?href="(?:mailto|tel):([^"]+)"[^>]*>\1<\/a>/i', '(\1)', $html );
 	}
 
 	/**
@@ -171,15 +175,20 @@ class RestApiGetContent extends SimpleHandler {
 	 * @param string $html The HTML string to search.
 	 * @return string the re-formatted text
 	 */
-	function reformatLinks(string $html): string
-	{
-		return preg_replace_callback('/<a\s+.*?href="([^"]+)"[^>]*>([^<]*)<\/a>/i', 'self::reformatLinksCallback', $html);
+	private function reformatLinks( string $html ): string {
+		return preg_replace_callback( '/<a\s+.*?href="([^"]+)"[^>]*>([^<]*)<\/a>/i',
+			'self::reformatLinksCallback', $html
+		);
 	}
 
-	static function reformatLinksCallback($matches): string
-	{
-		$url = str_replace('mailto:', '', $matches[1]);
-		return $matches[2] . ' (' . urldecode($url) . ')';
+	/**
+	 * Reformat how links are displayed
+	 * @param array $matches
+	 * @return string
+	 */
+	public static function reformatLinksCallback( $matches ): string {
+		$url = str_replace( 'mailto:', '', $matches[1] );
+		return $matches[2] . ' (' . urldecode( $url ) . ')';
 	}
 
 	/**
@@ -188,24 +197,29 @@ class RestApiGetContent extends SimpleHandler {
 	 * @param string $html The HTML fragment
 	 * @return DOMDocument $dom The DOMDocument instance.
 	 */
-	function getDomDocumentFromFragment(string $html): DOMDocument
-	{
-		libxml_use_internal_errors(true);
+	private function getDomDocumentFromFragment( string $html ): DOMDocument {
+		libxml_use_internal_errors( true );
 		$dom = new DOMDocument();
 		$dom->preserveWhiteSpace = true;
 		// Unicode-compatibility - see:
 		// https://stackoverflow.com/questions/8218230/php-domdocument-loadhtml-not-encoding-utf-8-correctly
-		$dom->loadHTML('<?xml encoding="utf-8" ?>' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+		$dom->loadHTML( '<?xml encoding="utf-8" ?>' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD );
 
 		return $dom;
 	}
 
-	function removeEmptyElements()
-	{
+	/**
+	 * Remove empty elements from a DOMDocument
+	 * @return void
+	 */
+	private function removeEmptyElements() {
 		$xpath = new \DOMXPath( $this->dom );
-		while (($node_list = $xpath->query('//*[not(*) and not(@*) and not(text()[normalize-space()])]')) && $node_list->length) {
-			foreach ($node_list as $node) {
-				$node->parentNode->removeChild($node);
+		// phpcs:ignore Generic.CodeAnalysis.AssignmentInCondition.FoundInWhileCondition
+		while ( ( $node_list = $xpath->query( '//*[not(*) and not(@*) and not(text()[normalize-space()])]' ) )
+			&& $node_list->length
+		) {
+			foreach ( $node_list as $node ) {
+				$node->parentNode->removeChild( $node );
 			}
 		}
 	}
@@ -216,14 +230,13 @@ class RestApiGetContent extends SimpleHandler {
 	 * @param string $selector The CSS selector to use to find the element.
 	 * @return string The content of the matched element, including child elements.
 	 */
-	function getElementContentBySelector( string $selector ): string
-	{
+	private function getElementContentBySelector( string $selector ): string {
 		$converter = new CssSelectorConverter();
 		$xpath = new \DOMXpath( $this->dom );
-		$elements = $xpath->query($converter->toXPath($selector));
-		if ($elements->length > 0) {
-			$element = $elements->item(0);
-			$content = $this->dom->saveHTML($element);
+		$elements = $xpath->query( $converter->toXPath( $selector ) );
+		if ( $elements->length > 0 ) {
+			$element = $elements->item( 0 );
+			$content = $this->dom->saveHTML( $element );
 			return $content;
 		}
 
@@ -235,17 +248,19 @@ class RestApiGetContent extends SimpleHandler {
 	 *
 	 * @param string $selector The CSS selector to use to find the elements to remove.
 	 */
-	function removeElementsBySelector( string $selector): void
-	{
+	private function removeElementsBySelector( string $selector ): void {
 		$converter = new CssSelectorConverter();
 		$xpath = new DOMXpath( $this->dom );
-		$elements = $xpath->query($converter->toXPath($selector));
-		foreach ($elements as $element) {
-			$element->parentNode->removeChild($element);
+		$elements = $xpath->query( $converter->toXPath( $selector ) );
+		foreach ( $elements as $element ) {
+			$element->parentNode->removeChild( $element );
 		}
 	}
 
-	function getOnlyVisibleCategories() {
+	/**
+	 * @return array of category names
+	 */
+	private function getOnlyVisibleCategories() {
 		$categories = iterator_to_array( $this->getWikiPage()->getCategories() );
 		$hiddenCategories = $this->getWikiPage()->getHiddenCategories();
 		$visibleCategories = array_diff( $categories, $hiddenCategories );
@@ -258,13 +273,18 @@ class RestApiGetContent extends SimpleHandler {
 		return $plainNames;
 	}
 
-	function getPageData() {
+	/**
+	 * Gather everything we need to send
+	 *
+	 * @return array|string
+	 */
+	private function getPageData() {
 		$contentLanguage = MediaWikiServices::getInstance()->getContentLanguage();
 		// Ignore pages in a language other than the wiki's content language
 		if ( $this->getTitle()->getPageLanguage()->getCode() !== $contentLanguage->getCode() ) {
 			// @todo decide on error format
 			return 'error';
-		};
+		}
 
 		$renderedRevision = $this->revisionRenderer->getRenderedRevision( $this->getRevisionRecord() );
 		$parserOutput = $renderedRevision->getRevisionParserOutput();
@@ -273,30 +293,30 @@ class RestApiGetContent extends SimpleHandler {
 		$categories = $this->getOnlyVisibleCategories();
 
 		// Remove comments before further processing using DOM
-		$pageHtml = preg_replace('/<!--[\s\S]*?-->/', '', $pageHtml);
+		$pageHtml = preg_replace( '/<!--[\s\S]*?-->/', '', $pageHtml );
 		$this->dom = $this->getDomDocumentFromFragment( $pageHtml );
 
 		// Extract the summary content
-		$summary = $this->getElementContentBySelector( '.article-summary');
-		$summary = $this->convertHtmlToText($summary);
+		$summary = $this->getElementContentBySelector( '.article-summary' );
+		$summary = $this->convertHtmlToText( $summary );
 
 		// Remove the summary from the document
-		$this->removeElementsBySelector( '.article-summary');
+		$this->removeElementsBySelector( '.article-summary' );
 
 		$this->removeElementsBySelector( '.share-links' );
 
 		// Remove other useless elements
-		$this->removeElementsBySelector( '.toc-box');
+		$this->removeElementsBySelector( '.toc-box' );
 
 		// Remove maps - rare, probably only a single page, but still annoying
-		$this->removeElementsBySelector( '.maps-map');
+		$this->removeElementsBySelector( '.maps-map' );
 
 		$this->removeEmptyElements();
 
 		// Extract the main content
 		$processedHtml = $this->dom->saveHTML();
-		$processedHtml = html_entity_decode($processedHtml, ENT_COMPAT | ENT_HTML401, 'UTF-8');
-		$mainContent = $this->convertHtmlToText($processedHtml);
+		$processedHtml = html_entity_decode( $processedHtml, ENT_COMPAT | ENT_HTML401, 'UTF-8' );
+		$mainContent = $this->convertHtmlToText( $processedHtml );
 
 		$articleTypeCode = ArticleType::getArticleType( $this->getTitle() );
 		$articleType = ArticleType::getReadableArticleTypeFromCode( $articleTypeCode, 2 );
@@ -309,9 +329,9 @@ class RestApiGetContent extends SimpleHandler {
 			'url' => urldecode( $this->getTitle()->getFullURL() ),
 			'articleType' => $articleType,
 			'articleContentArea' => $articleContentArea,
-			'summary' => trim($summary),
-			'content' => trim($mainContent),
-			'contentHtml' => trim($processedHtml),
+			'summary' => trim( $summary ),
+			'content' => trim( $mainContent ),
+			'contentHtml' => trim( $processedHtml ),
 			'categories' => $categories
 		];
 	}

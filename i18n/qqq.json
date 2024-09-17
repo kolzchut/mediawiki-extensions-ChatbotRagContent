@@ -4,5 +4,6 @@
 			"Your Name"
 		]
 	},
-	"chatbotragcontent-desc": "{{desc|name=ChatbotRagContent|url=https://github.com/kolzchut/mediawiki-extensions-ChatbotRagContent}}"
+	"chatbotragcontent-desc": "{{desc|name=ChatbotRagContent|url=https://github.com/kolzchut/mediawiki-extensions-ChatbotRagContent}}",
+	"rest-deleted-title": "The title passed to the API ($1) does not exist"
 }
