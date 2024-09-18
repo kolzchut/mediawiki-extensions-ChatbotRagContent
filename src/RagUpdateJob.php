@@ -48,7 +48,7 @@ class RagUpdateJob extends Job {
 		// Build data to append to request
 		$data = [
 			'page_id' => $this->getTitle()->getId(),
-			'callback_uri' => $this->getRestApiUrl()
+			'callback_uri' => self::getRestApiUrl()
 		];
 
 		$request = MediaWikiServices::getInstance()->getHttpRequestFactory()
@@ -60,7 +60,7 @@ class RagUpdateJob extends Job {
 		$status = $request->execute();
 		if ( !$status->isOK() ) {
 			$this->error = 'http';
-			wfDebugLog( 'ChatbotRagContent', "Pingback error: {$request->getStatus()}" );
+			wfDebugLog( 'ChatbotRagContent', "Pingback error: {$request->getStatus()}" . print_r( $data, true ) );
 			return false;
 		}
 
@@ -72,11 +72,11 @@ class RagUpdateJob extends Job {
 	 *
 	 * @return string
 	 */
-	private function getRestApiUrl(): string {
+	private static function getRestApiUrl(): string {
 		$config = MediaWikiServices::getInstance()->getMainConfig();
 		$server = $config->get( 'Server' );
 		$path = $config->get( 'RestPath' );
 
-		return $server . $path . '/cbragcontent/v0/page_id/' . $this->getTitle()->getId();
+		return $server . $path . '/cbragcontent/v0/page_id/';
 	}
 }
