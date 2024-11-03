@@ -286,13 +286,6 @@ class RestApiGetContent extends SimpleHandler {
 	 * @return array|string
 	 */
 	private function getPageData() {
-		$contentLanguage = MediaWikiServices::getInstance()->getContentLanguage();
-		// Ignore pages in a language other than the wiki's content language
-		if ( $this->getTitle()->getPageLanguage()->getCode() !== $contentLanguage->getCode() ) {
-			// @todo decide on error format
-			return 'error';
-		}
-
 		$renderedRevision = $this->revisionRenderer->getRenderedRevision( $this->getRevisionRecord() );
 		$parserOutput = $renderedRevision->getRevisionParserOutput();
 		$pageHtml = $parserOutput->getText( [ 'allowTOC' => false, 'enableSectionEditLinks' => false ] );
