@@ -27,6 +27,10 @@
 			"value": [
 				0
 			]
+		},
+		"ChatbotRagContentArticleTypeBlocklist": {
+			"description": "Array of article types not included in content updates",
+			"value": []
 		}
 	},
 	"HookHandlers": {

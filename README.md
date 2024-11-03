@@ -10,10 +10,11 @@ Kol-Zchut and Webix, and as such the data format is probably not universally use
 
 
 ## Configuration options
-| Name                           | values              | Role                                           |
-|--------------------------------|---------------------|------------------------------------------------|
-| $wgChatbotRagContentPingURL    | URL                 | Pinged on every content update                 |
-| $wgChatbotRagContentNamespaces | Array of namespaces | Which namespaces this extension should work in |
+| Name                                     | values                 | Role                                           |
+|------------------------------------------|------------------------|------------------------------------------------|
+| $wgChatbotRagContentPingURL              | URL                    | Pinged on every content update                 |
+| $wgChatbotRagContentNamespaces           | Array of namespaces    | Which namespaces this extension should work in |
+| $wgChatbotRagContentArticleTypeBlocklist | array of article types | Article types to be ignored                    |
 
 ### $wgChatbotRagContentPingURL
 The data will be sent as JSON to the specified URL, in the following format:
@@ -21,7 +22,7 @@ The data will be sent as JSON to the specified URL, in the following format:
 {
     "page_id": 3,
     "rev_id": 13500,
-    "callback_uri": "https://example.com/w/rest.php/cbragcontent/v0/page_id/3"
+    "callback_url": "https://example.com/w/rest.php/cbragcontent/v0/page_id/3"
 }
 ```
 ## API for content retrieval
