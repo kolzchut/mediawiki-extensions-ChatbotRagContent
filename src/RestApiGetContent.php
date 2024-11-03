@@ -12,6 +12,7 @@ use MediaWiki\Rest\LocalizedHttpException;
 use MediaWiki\Rest\SimpleHandler;
 use MediaWiki\Revision\RevisionRenderer;
 use MediaWiki\Storage\RevisionRecord;
+use MWException;
 use RequestContext;
 use Symfony\Component\CssSelector\CssSelectorConverter;
 use Title;
@@ -54,8 +55,12 @@ class RestApiGetContent extends SimpleHandler {
 	/**
 	 * @var DOMDocument
 	 */
-	private $dom;
+	private DOMDocument $dom;
 
+	/**
+	 * @param PermissionManager $permissionManager
+	 * @param RevisionRenderer $revisionRenderer
+	 */
 	public function __construct(
 		PermissionManager $permissionManager,
 		RevisionRenderer $revisionRenderer
@@ -79,13 +84,14 @@ class RestApiGetContent extends SimpleHandler {
 	/**
 	 * Get a wikipage record for this title
 	 * @return \WikiCategoryPage|\WikiFilePage|WikiPage|null
-	 * @throws \MWException
+	 * @throws MWException
 	 */
 	private function getWikiPage() {
 		if ( $this->wikiPage === null ) {
 			if ( method_exists( MediaWikiServices::class, 'getWikiPageFactory' ) ) {
 				// MW 1.36+
 				$mwServices = MediaWikiServices::getInstance();
+				/** @noinspection PhpUndefinedMethodInspection */
 				$this->wikiPage = $mwServices->getWikiPageFactory()->newFromTitle( $this->getTitle() );
 			} else {
 				$this->wikiPage = WikiPage::factory( $this->getTitle() );
@@ -95,9 +101,10 @@ class RestApiGetContent extends SimpleHandler {
 	}
 
 	/**
-	 * @return \MediaWiki\Revision\RevisionRecord|RevisionRecord|null
+	 * @return RevisionRecord|null
+	 * @throws MWException
 	 */
-	private function getRevisionRecord() {
+	private function getRevisionRecord(): ?RevisionRecord {
 		if ( $this->revisionRecord === null ) {
 			$this->revisionRecord = $this->getWikiPage()->getRevisionRecord();
 		}
@@ -127,7 +134,7 @@ class RestApiGetContent extends SimpleHandler {
 	}
 
 	/** @inheritDoc */
-	public function getParamSettings() {
+	public function getParamSettings(): array {
 		return [
 			'identifier' => [
 				self::PARAM_SOURCE => 'path',
@@ -138,7 +145,7 @@ class RestApiGetContent extends SimpleHandler {
 	}
 
 	/** @inheritDoc */
-	public function needsWriteAccess() {
+	public function needsWriteAccess(): bool {
 		return false;
 	}
 
