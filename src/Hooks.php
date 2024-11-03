@@ -59,9 +59,13 @@ class Hooks implements
 	/**
 	 * @param Title $title
 	 * @param bool $ignoreNamespaceCheck
+	 * @return bool
 	 */
 	private static function pushNewJob( $title, bool $ignoreNamespaceCheck = false ): bool {
-		if ( !ChatbotRagContent::isRelevantTitle( $title, $ignoreNamespaceCheck ) ) {
+		$services = MediaWikiServices::getInstance();
+		$url = $services->getMainConfig()->get( 'ChatbotRagContentPingURL' );
+
+		if ( !$url || !ChatbotRagContent::isRelevantTitle( $title, $ignoreNamespaceCheck ) ) {
 			return false;
 		}
 
