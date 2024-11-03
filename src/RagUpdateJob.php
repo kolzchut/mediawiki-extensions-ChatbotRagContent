@@ -48,7 +48,7 @@ class RagUpdateJob extends Job {
 		// Build data to append to request
 		$data = [
 			'page_id' => $this->getTitle()->getId(),
-			'callback_uri' => self::getRestApiUrl()
+			'callback_url' => self::getRestApiUrl()
 		];
 
 		$request = MediaWikiServices::getInstance()->getHttpRequestFactory()
