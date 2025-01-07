@@ -10,9 +10,12 @@
 	"requires": {
 		"MediaWiki": ">= 1.35.0"
 	},
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"AutoloadNamespaces": {
 		"MediaWiki\\Extension\\ChatbotRagContent\\": "src/"
+	},
+	"TestAutoloadNamespaces": {
+		"MediaWiki\\Extension\\ChatbotRagContent\\Tests\\": "tests/phpunit/"
 	},
 	"JobClasses": {
 		"ragUpdate": "MediaWiki\\Extension\\ChatbotRagContent\\RagUpdateJob"
@@ -30,6 +33,10 @@
 		},
 		"ChatbotRagContentArticleTypeBlocklist": {
 			"description": "Array of article types not included in content updates",
+			"value": []
+		},
+		"ChatbotRagContentTitleAllowlist": {
+			"description": "Array of page titles that should be included in content updates, overriding namespace restrictions",
 			"value": []
 		}
 	},

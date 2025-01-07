@@ -12,12 +12,29 @@ class ChatbotRagContent {
 	 * @return bool
 	 */
 	public static function isRelevantTitle( Title $title, bool $ignoreNamespaceCheck = false ): bool {
-		return $title->exists()
-			&& !$title->isRedirect()
-			&& self::isInWikiLanguage( $title )
-			&& $title->isWikitextPage()
-			&& ( $ignoreNamespaceCheck || self::isAllowedNamespace( $title->getNamespace() ) )
-			&& self::isTitleAllowedArticleType( $title );
+		if ( !$title->exists() ||
+			$title->isRedirect() ||
+			!self::isInWikiLanguage( $title ) ||
+			!$title->isWikitextPage()
+		) {
+			return false;
+		}
+
+		$config = MediaWikiServices::getInstance()->getMainConfig();
+
+		$allowlist = $config->get( 'ChatbotRagContentTitleAllowlist' );
+		if ( in_array( $title->getFullText(), $allowlist ) ) {
+			return true;
+		}
+
+		if ( !$ignoreNamespaceCheck ) {
+			$allowedNamespaces = $config->get( 'ChatbotRagContentNamespaces' );
+			if ( !in_array( $title->getNamespace(), $allowedNamespaces ) ) {
+				return false;
+			}
+		}
+
+		return self::isTitleAllowedArticleType( $title );
 	}
 
 	/**
