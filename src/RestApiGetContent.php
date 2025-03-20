@@ -8,6 +8,7 @@ use MediaWiki\Extension\ArticleContentArea\ArticleContentArea;
 use MediaWiki\Extension\ArticleType\ArticleType;
 use MediaWiki\MediaWikiServices;
 use MediaWiki\Permissions\PermissionManager;
+use MediaWiki\Rest\HttpException;
 use MediaWiki\Rest\LocalizedHttpException;
 use MediaWiki\Rest\SimpleHandler;
 use MediaWiki\Revision\RevisionRenderer;
@@ -27,7 +28,6 @@ use WikiPage;
  * Example class to echo a path parameter
  */
 class RestApiGetContent extends SimpleHandler {
-
 	/** @var PermissionManager */
 	private $permissionManager;
 
@@ -36,6 +36,11 @@ class RestApiGetContent extends SimpleHandler {
 
 	/** @var User */
 	private $user;
+
+	/**
+	 * @var int
+	 */
+	private $pageId;
 
 	/**
 	 * @var Title|bool|null
@@ -72,29 +77,47 @@ class RestApiGetContent extends SimpleHandler {
 	}
 
 	/**
-	 * @return Title|bool Title or false if unable to retrieve title
+	 * @return Title|false Title or false if unable to retrieve title
 	 */
 	private function getTitle() {
 		if ( $this->title === null ) {
-			$this->title = Title::newFromID( $this->getValidatedParams()['identifier'] ) ?? false;
+			$this->title = Title::newFromID( $this->getPageId() ) ?? false;
 		}
 		return $this->title;
 	}
 
 	/**
+	 * @return int
+	 */
+	private function getPageId() {
+		if ( !isset( $this->pageId ) ) {
+			$this->pageId = (int)$this->getValidatedParams()['identifier'];
+		}
+
+		return $this->pageId;
+	}
+
+	/**
 	 * Get a wikipage record for this title
-	 * @return \WikiCategoryPage|\WikiFilePage|WikiPage|null
-	 * @throws MWException
+	 * @return WikiPage|false
 	 */
 	private function getWikiPage() {
 		if ( $this->wikiPage === null ) {
-			if ( method_exists( MediaWikiServices::class, 'getWikiPageFactory' ) ) {
-				// MW 1.36+
-				$mwServices = MediaWikiServices::getInstance();
-				/** @noinspection PhpUndefinedMethodInspection */
-				$this->wikiPage = $mwServices->getWikiPageFactory()->newFromTitle( $this->getTitle() );
-			} else {
-				$this->wikiPage = WikiPage::factory( $this->getTitle() );
+			$title = $this->getTitle();
+			if ( !$title ) {
+				return false;
+			}
+			try {
+				if ( method_exists( MediaWikiServices::class, 'getWikiPageFactory' ) ) {
+					// MW 1.36+
+					$mwServices = MediaWikiServices::getInstance();
+					/** @noinspection PhpUndefinedMethodInspection */
+					$this->wikiPage = $mwServices->getWikiPageFactory()->newFromTitle( $title );
+				} else {
+					$this->wikiPage = WikiPage::factory( $title );
+				}
+			} catch ( MWException $e ) {
+				return false;
 			}
 		}
 		return $this->wikiPage;
@@ -102,25 +125,39 @@ class RestApiGetContent extends SimpleHandler {
 
 	/**
 	 * @return RevisionRecord|null
-	 * @throws MWException
 	 */
 	private function getRevisionRecord(): ?RevisionRecord {
 		if ( $this->revisionRecord === null ) {
+			$wikiPage = $this->getWikiPage();
+			if ( !$wikiPage ) {
+				return null;
+			}
 			$this->revisionRecord = $this->getWikiPage()->getRevisionRecord();
 		}
 		return $this->revisionRecord;
 	}
 
-	/** @inheritDoc */
-	public function run( $page_id ) {
+	/**
+	 * @param int $page_id
+	 * @return array
+	 * @throws LocalizedHttpException
+	 * @throws HttpException
+	 */
+	public function run( int $page_id ) {
+		if ( !$page_id ) {
+			throw new HttpException( 'No page ID provided', 400 );
+		}
+
+		$this->pageId = $page_id;
+		$wikiPage = $this->getWikiPage();
+
+		if ( !$wikiPage || !$this->getTitle() ) {
+			throw new HttpException( 'Invalid page ID provided: ' . $page_id, 404 );
+		}
+
 		$titleObj = $this->getTitle();
-		if ( !$titleObj || !$titleObj->getArticleID() || !ChatbotRagContent::isRelevantTitle( $titleObj ) ) {
-			throw new LocalizedHttpException(
-				new MessageValue( 'rest-nonexistent-title',
-					[ new ScalarParam( ParamType::PLAINTEXT, $page_id ) ]
-				),
-				404
-			);
+		if ( !ChatbotRagContent::isRelevantTitle( $titleObj ) ) {
+			throw new HttpException( 'irrelevant title', 404 );
 		}
 		if ( !$this->permissionManager->userCan( 'read', $this->user, $titleObj ) ) {
 			throw new LocalizedHttpException(
@@ -129,8 +166,12 @@ class RestApiGetContent extends SimpleHandler {
 				403
 			);
 		}
-
-		return $this->getPageData();
+		try {
+			$pageData = $this->getPageData();
+		} catch ( MWException $e ) {
+			throw new HttpException( 'Could not get page data', 500 );
+		}
+		return $pageData;
 	}
 
 	/** @inheritDoc */
@@ -283,7 +324,8 @@ class RestApiGetContent extends SimpleHandler {
 	/**
 	 * Gather everything we need to send
 	 *
-	 * @return array|string
+	 * @return array
+	 * @throws MWException
 	 */
 	private function getPageData() {
 		$renderedRevision = $this->revisionRenderer->getRenderedRevision( $this->getRevisionRecord() );
@@ -322,8 +364,15 @@ class RestApiGetContent extends SimpleHandler {
 		$articleType = ArticleType::getReadableArticleTypeFromCode( $articleTypeCode, 2 );
 		$articleContentArea = ArticleContentArea::getArticleContentArea( $this->getTitle() ) ?? 'unknown';
 
+		try {
+			$wikiPage = $this->getWikiPage();
+			$revisionRecord = $this->getRevisionRecord();
+		} catch ( MWException $e ) {
+			throw new MWException( 'Could not get WikiPage or RevisionRecord' );
+		}
+
 		return [
-			'page_id' => $this->getWikiPage()->getId(),
+			'page_id' => $wikiPage->getId(),
 			'title' => $this->getTitle()->getFullText(),
 			'namespace' => $this->getTitle()->getNamespace(),
 			'url' => urldecode( $this->getTitle()->getFullURL() ),
@@ -332,7 +381,9 @@ class RestApiGetContent extends SimpleHandler {
 			'summary' => trim( $summary ),
 			'content' => trim( $mainContent ),
 			'contentHtml' => trim( $processedHtml ),
-			'categories' => $categories
+			'categories' => $categories,
+			'revision_id' => $revisionRecord->getId(),
+			'revision_date' => $revisionRecord->getTimestamp()
 		];
 	}
 
