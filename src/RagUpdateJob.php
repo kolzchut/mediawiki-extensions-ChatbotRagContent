@@ -44,10 +44,14 @@ class RagUpdateJob extends Job {
 	public function run(): bool {
 		$services = MediaWikiServices::getInstance();
 		$url = $services->getMainConfig()->get( 'ChatbotRagContentPingURL' );
+		$revId = $this->getTitle()->getLatestRevID();
+		$revTimestamp = $services->getRevisionLookup()->getTimestampFromId( $revId );
 
 		// Build data to append to request
 		$data = [
 			'page_id' => $this->getTitle()->getId(),
+			'revision_id' => $revId,
+			'revision_date' => $revTimestamp,
 			'callback_url' => self::getRestApiUrl()
 		];
 
