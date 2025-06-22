@@ -3,6 +3,7 @@
 namespace MediaWiki\Extension\ChatbotRagContent;
 
 use MediaWiki\MediaWikiServices;
+use PageProps;
 use Title;
 
 class ChatbotRagContent {
@@ -17,6 +18,14 @@ class ChatbotRagContent {
 			!self::isInWikiLanguage( $title ) ||
 			!$title->isWikitextPage()
 		) {
+			return false;
+		}
+
+		// Exclude if the EXCLUDE_FROM_RAG magic word is set (via page property)
+		$pageProps = PageProps::getInstance();
+		$propArray = $pageProps->getProperties( $title, 'exclude_from_rag' );
+		$property = empty( $propArray ) ? null : array_values( $propArray )[0];
+		if ( $property !== null ) {
 			return false;
 		}
 

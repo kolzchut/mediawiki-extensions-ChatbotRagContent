@@ -4,7 +4,7 @@ Extension:ChatbotRagContent
 This extension is used to notify an external RAG database of content changes,
 and supply an API for retrieval of adapted content for that database.
 This extension was written specifically for use in a joint chatbot with RAG project between
-Kol-Zchut and Webix, and as such the data format is probably not universally useful.
+Kol-Zchut and Webix, and as such, the data format is probably not universally useful.
 
 [Document update flow by Webix](https://docs.google.com/document/d/1igsU6L2FJpWn6rYBwJfLLXwGUYq0vJpmvh6VZv86cn8/edit#heading=h.g0tflggr4vs3)
 
@@ -34,3 +34,16 @@ The extension provides a MediaWiki REST API endpoint, in this form:
 1. Pages updated
 2. New pages created directly in an allowed namespace
 3. Pages moved in/out of allowed namespaces
+
+## Magic Words
+
+### __EXCLUDE_FROM_RAG__
+If this magic word is present anywhere in a page, the page will be excluded from RAG content and API responses.
+This is useful for hiding sensitive or irrelevant pages from the RAG system. To use, simply add `__EXCLUDE_FROM_RAG__`
+anywhere in the page's wikitext. This also adds the page to the `Pages excluded from RAG` tracking category (localizable).
+
+**Example:**
+```
+This page should not be included in RAG.
+__EXCLUDE_FROM_RAG__
+```

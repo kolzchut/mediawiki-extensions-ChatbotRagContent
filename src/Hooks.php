@@ -22,11 +22,15 @@ namespace MediaWiki\Extension\ChatbotRagContent;
 use JobQueueGroup;
 use MediaWiki\MediaWikiServices;
 use Title;
+use MediaWiki\Hook\GetDoubleUnderscoreIDsHook;
+use MediaWiki\Hook\ParserAfterParseHook;
 
 class Hooks implements
 	\MediaWiki\Storage\Hook\RevisionDataUpdatesHook,
 	\MediaWiki\Page\Hook\PageDeletionDataUpdatesHook,
-	\MediaWiki\Hook\PageMoveCompleteHook
+	\MediaWiki\Hook\PageMoveCompleteHook,
+	GetDoubleUnderscoreIDsHook,
+	ParserAfterParseHook
 {
 
 	/**
@@ -53,6 +57,26 @@ class Hooks implements
 		if ( $oldNamespaceAllowed | $newNamespaceAllowed ) {
 			// Page moved in or out of an allowed namespace
 			self::pushNewJob( Title::newFromLinkTarget( $new ), true );
+		}
+	}
+
+	/**
+	 * Register the EXCLUDE_FROM_RAG magic word as a behavior switch
+	 * @param string[] &$ids
+	 */
+	public function onGetDoubleUnderscoreIDs( &$ids ) {
+		$ids[] = 'exclude_from_rag';
+	}
+
+	/**
+	 * Add tracking category for pages using __EXCLUDE_FROM_RAG__
+	 * @inheritDoc
+	 */
+	public function onParserAfterParse( $parser, &$text, $stripState ) {
+		// Check if the property exists and is not false
+		// getProperty() returns false when property doesn't exist (not null)
+		if ($parser->getOutput()->getProperty('exclude_from_rag') !== false) {
+			$parser->addTrackingCategory('chatbotragcontent-tracking-category-exclude-from-rag');
 		}
 	}
 

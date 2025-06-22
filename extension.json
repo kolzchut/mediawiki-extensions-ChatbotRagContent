@@ -48,9 +48,13 @@
 	"Hooks": {
 		"RevisionDataUpdates": "ChatbotRagContentHooks",
 		"PageDeletionDataUpdates": "ChatbotRagContentHooks",
-		"PageMoveComplete": "ChatbotRagContentHooks"
-
+		"PageMoveComplete": "ChatbotRagContentHooks",
+		"GetDoubleUnderscoreIDs": "ChatbotRagContentHooks",
+		"ParserAfterParse": "ChatbotRagContentHooks"
 	},
+	"TrackingCategories": [
+		"chatbotragcontent-tracking-category-exclude-from-rag"
+	],
 	"RestRoutes": [
 		{
 			"path": "/cbragcontent/v0/page_id/{identifier}",
@@ -66,6 +70,9 @@
 		"ChatbotRagContent": [
 			"i18n"
 		]
+	},
+	"ExtensionMessagesFiles": {
+		"ChatbotRagContentMagic": "ChatbotRagContent.i18n.magic.php"
 	},
 	"manifest_version": 2
 }

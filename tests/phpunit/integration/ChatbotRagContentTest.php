@@ -134,4 +134,31 @@ class ChatbotRagContentTest extends MediaWikiIntegrationTestCase {
 			'Pages should be relevant when namespace check is ignored'
 		);
 	}
+
+	public function testIsRelevantTitleReturnsFalseIfExcludeFromRagMagicWordIsSet() {
+		$title = $this->createMock( Title::class );
+		$title->method( 'exists' )->willReturn( true );
+		$title->method( 'isRedirect' )->willReturn( false );
+		$title->method( 'getPageLanguage' )
+			->willReturn( Language::factory( 'en' ) );
+		$title->method( 'isWikitextPage' )->willReturn( true );
+		$title->method( 'getFullText' )->willReturn( 'Some Page' );
+		$title->method( 'getNamespace' )->willReturn( NS_MAIN );
+
+		// Mock the PageProps singleton to simulate the exclude_from_rag property
+		$mockPageProps = $this->createMock( \PageProps::class );
+		$mockPageProps->method( 'getProperties' )
+			->with( $title, 'exclude_from_rag' )
+			->willReturn( [ 'exclude_from_rag' => true ] );
+
+		// Use reflection to set the singleton instance (MW 1.35 compatibility)
+		$ref = new \ReflectionProperty( \PageProps::class, 'instance' );
+		$ref->setAccessible( true );
+		$ref->setValue( $mockPageProps );
+
+		$this->assertFalse(
+			\MediaWiki\Extension\ChatbotRagContent\ChatbotRagContent::isRelevantTitle( $title ),
+			'Pages with __EXCLUDE_FROM_RAG__ magic word should not be relevant'
+		);
+	}
 }
