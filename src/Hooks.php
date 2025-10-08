@@ -20,10 +20,10 @@
 namespace MediaWiki\Extension\ChatbotRagContent;
 
 use JobQueueGroup;
-use MediaWiki\MediaWikiServices;
-use Title;
 use MediaWiki\Hook\GetDoubleUnderscoreIDsHook;
 use MediaWiki\Hook\ParserAfterParseHook;
+use MediaWiki\MediaWikiServices;
+use Title;
 
 class Hooks implements
 	\MediaWiki\Storage\Hook\RevisionDataUpdatesHook,
@@ -44,7 +44,45 @@ class Hooks implements
 	 * @inheritDoc
 	 */
 	public function onPageDeletionDataUpdates( $title, $revision, &$updates ) {
-		self::pushNewJob( $title );
+		$services = MediaWikiServices::getInstance();
+		$config = $services->getMainConfig();
+		$url = $config->get( 'ChatbotRagContentPingURL' );
+
+		if ( !$url ) {
+			return;
+		}
+
+		// For deletions, we can only reliably check namespace and allowlist.
+		// We can't check exists(), redirects, language, magic words, or article type
+		// since the page is being deleted. The RAG backend will handle spurious
+		// notifications gracefully: when it fetches the page and gets a 404, it will
+		// either remove it from the index (if indexed) or ignore it (if not).
+		$allowlist = $config->get( 'ChatbotRagContentTitleAllowlist' );
+		$inAllowlist = in_array( $title->getFullText(), $allowlist );
+		$inAllowedNamespace = ChatbotRagContent::isAllowedNamespace( $title->getNamespace() );
+
+		if ( !$inAllowlist && !$inAllowedNamespace ) {
+			return;
+		}
+
+		// Pass the revision data since we can't fetch it after deletion
+		$params = [];
+		if ( $revision ) {
+			$params['page_id'] = $revision->getPageId();
+			$params['revision_id'] = $revision->getId();
+			$params['revision_date'] = $revision->getTimestamp();
+		}
+
+		// Create job directly without going through pushNewJob to avoid exists() check
+		if ( method_exists( MediaWikiServices::class, 'getJobQueueGroup' ) ) {
+			// MW 1.37+
+			$jobQueue = $services->getJobQueueGroup();
+		} else {
+			$jobQueue = JobQueueGroup::singleton();
+		}
+
+		$job = new RagUpdateJob( $title, $params );
+		$jobQueue->push( $job );
 	}
 
 	/**
@@ -75,17 +113,18 @@ class Hooks implements
 	public function onParserAfterParse( $parser, &$text, $stripState ) {
 		// Check if the property exists and is not false
 		// getProperty() returns false when property doesn't exist (not null)
-		if ($parser->getOutput()->getProperty('exclude_from_rag') !== false) {
-			$parser->addTrackingCategory('chatbotragcontent-tracking-category-exclude-from-rag');
+		if ( $parser->getOutput()->getProperty( 'exclude_from_rag' ) !== false ) {
+			$parser->addTrackingCategory( 'chatbotragcontent-tracking-category-exclude-from-rag' );
 		}
 	}
 
 	/**
 	 * @param Title $title
 	 * @param bool $ignoreNamespaceCheck
+	 * @param array $params Additional parameters to pass to the job
 	 * @return bool
 	 */
-	private static function pushNewJob( $title, bool $ignoreNamespaceCheck = false ): bool {
+	private static function pushNewJob( $title, bool $ignoreNamespaceCheck = false, array $params = [] ): bool {
 		$services = MediaWikiServices::getInstance();
 		$url = $services->getMainConfig()->get( 'ChatbotRagContentPingURL' );
 
@@ -100,7 +139,7 @@ class Hooks implements
 			$jobQueue = JobQueueGroup::singleton();
 		}
 
-		$job = new RagUpdateJob( $title );
+		$job = new RagUpdateJob( $title, $params );
 		$jobQueue->push( $job );
 
 		return true;

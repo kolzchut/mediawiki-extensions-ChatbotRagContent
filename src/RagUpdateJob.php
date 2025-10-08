@@ -21,6 +21,7 @@
 namespace MediaWiki\Extension\ChatbotRagContent;
 
 use Job;
+use MediaWiki\Logger\LoggerFactory;
 use MediaWiki\MediaWikiServices;
 use Title;
 
@@ -44,12 +45,35 @@ class RagUpdateJob extends Job {
 	public function run(): bool {
 		$services = MediaWikiServices::getInstance();
 		$url = $services->getMainConfig()->get( 'ChatbotRagContentPingURL' );
-		$revId = $this->getTitle()->getLatestRevID();
-		$revTimestamp = $services->getRevisionLookup()->getTimestampFromId( $revId );
+		$logger = LoggerFactory::getInstance( 'ChatbotRagContent' );
+
+		// Use revision data from params if provided (e.g., for deletions)
+		// Otherwise fetch from the current title (for normal updates)
+		if ( isset( $this->params['revision_id'] ) && isset( $this->params['revision_date'] ) ) {
+			$revId = $this->params['revision_id'];
+			$revTimestamp = $this->params['revision_date'];
+			$pageId = $this->params['page_id'];
+		} else {
+			$revId = $this->getTitle()->getLatestRevID();
+			$revTimestamp = $services->getRevisionLookup()->getTimestampFromId( $revId );
+			$pageId = $this->getTitle()->getId();
+		}
+
+		// Validate that we have valid revision data before sending
+		if ( !$revId || !$revTimestamp || !$pageId ) {
+			$this->setLastError( 'Unable to get valid revision data' );
+			$logger->error( 'Unable to get valid revision data for page', [
+				'page_title' => $this->getTitle()->getPrefixedText(),
+				'page_id' => $pageId,
+				'revision_id' => $revId,
+				'revision_date' => $revTimestamp
+			] );
+			return false;
+		}
 
 		// Build data to append to request
 		$data = [
-			'page_id' => $this->getTitle()->getId(),
+			'page_id' => $pageId,
 			'revision_id' => $revId,
 			'revision_date' => $revTimestamp,
 			'callback_url' => self::getRestApiUrl()
@@ -63,10 +87,20 @@ class RagUpdateJob extends Job {
 		$request->setHeader( 'Content-Type', 'application/json' );
 		$status = $request->execute();
 		if ( !$status->isOK() ) {
-			$this->error = 'http';
-			wfDebugLog( 'ChatbotRagContent', "Pingback error: {$request->getStatus()}" . print_r( $data, true ) );
+			$this->setLastError( 'HTTP request to RAG endpoint failed: ' . $status->getMessage()->text() );
+			$logger->error( 'Pingback to RAG endpoint failed', [
+				'page_title' => $this->getTitle()->getPrefixedText(),
+				'url' => $url,
+				'status' => $request->getStatus(),
+				'data' => $data
+			] );
 			return false;
 		}
+
+		$logger->info( 'Pingback to RAG endpoint successful', [
+			'page_title' => $this->getTitle()->getPrefixedText(),
+			'data' => $data
+		] );
 
 		return true;
 	}
