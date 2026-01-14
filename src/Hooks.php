@@ -74,12 +74,7 @@ class Hooks implements
 		}
 
 		// Create job directly without going through pushNewJob to avoid exists() check
-		if ( method_exists( MediaWikiServices::class, 'getJobQueueGroup' ) ) {
-			// MW 1.37+
-			$jobQueue = $services->getJobQueueGroup();
-		} else {
-			$jobQueue = JobQueueGroup::singleton();
-		}
+		$jobQueue = $services->getJobQueueGroup();
 
 		$job = new RagUpdateJob( $title, $params );
 		$jobQueue->push( $job );
@@ -113,7 +108,7 @@ class Hooks implements
 	public function onParserAfterParse( $parser, &$text, $stripState ) {
 		// Check if the property exists and is not false
 		// getProperty() returns false when property doesn't exist (not null)
-		if ( $parser->getOutput()->getProperty( 'exclude_from_rag' ) !== false ) {
+		if ( $parser->getOutput()->getPageProperty( 'exclude_from_rag' ) !== false ) {
 			$parser->addTrackingCategory( 'chatbotragcontent-tracking-category-exclude-from-rag' );
 		}
 	}
@@ -132,12 +127,7 @@ class Hooks implements
 			return false;
 		}
 
-		if ( method_exists( MediaWikiServices::class, 'getJobQueueGroup' ) ) {
-			// MW 1.37+
-			$jobQueue = MediaWikiServices::getInstance()->getJobQueueGroup();
-		} else {
-			$jobQueue = JobQueueGroup::singleton();
-		}
+		$jobQueue = MediaWikiServices::getInstance()->getJobQueueGroup();
 
 		$job = new RagUpdateJob( $title, $params );
 		$jobQueue->push( $job );

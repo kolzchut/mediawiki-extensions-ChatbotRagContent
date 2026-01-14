@@ -22,7 +22,7 @@ class ChatbotRagContent {
 		}
 
 		// Exclude if the EXCLUDE_FROM_RAG magic word is set (via page property)
-		$pageProps = PageProps::getInstance();
+		$pageProps = MediaWikiServices::getInstance()->getPageProps();
 		$propArray = $pageProps->getProperties( $title, 'exclude_from_rag' );
 		$property = empty( $propArray ) ? null : array_values( $propArray )[0];
 		if ( $property !== null ) {
