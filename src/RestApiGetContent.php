@@ -4,92 +4,58 @@ namespace MediaWiki\Extension\ChatbotRagContent;
 
 use DOMDocument;
 use DOMXPath;
+use Language;
+use MediaWiki\Config\Config;
 use MediaWiki\Extension\ArticleContentArea\ArticleContentArea;
 use MediaWiki\Extension\ArticleType\ArticleType;
-use MediaWiki\MediaWikiServices;
+use MediaWiki\Page\WikiPageFactory;
 use MediaWiki\Permissions\PermissionManager;
 use MediaWiki\Rest\HttpException;
 use MediaWiki\Rest\LocalizedHttpException;
 use MediaWiki\Rest\SimpleHandler;
 use MediaWiki\Revision\RevisionRenderer;
 use MediaWiki\Storage\RevisionRecord;
+use MediaWiki\Title\Title;
+use MediaWiki\Title\TitleFactory;
 use MWException;
-use RequestContext;
+use PageProps;
 use Symfony\Component\CssSelector\CssSelectorConverter;
-use Title;
-use User;
 use Wikimedia\Message\MessageValue;
 use Wikimedia\Message\ParamType;
 use Wikimedia\Message\ScalarParam;
 use Wikimedia\ParamValidator\ParamValidator;
 use WikiPage;
 
-/**
- * Example class to echo a path parameter
- */
 class RestApiGetContent extends SimpleHandler {
-	/** @var PermissionManager */
-	private $permissionManager;
+	private int $pageId;
 
-	/** @var RevisionRenderer */
-	private $revisionRenderer;
+	private ?Title $title = null;
 
-	/** @var User */
-	private $user;
+	private ?WikiPage $wikiPage = null;
 
-	/**
-	 * @var int
-	 */
-	private $pageId;
-
-	/**
-	 * @var Title|bool|null
-	 */
-	private $title = null;
-
-	/**
-	 * @var WikiPage|null
-	 */
-	private $wikiPage = null;
-
-	/**
-	 * @var RevisionRecord|null
-	 */
-	private $revisionRecord	= null;
-
-	/**
-	 * @var DOMDocument
-	 */
+	private ?RevisionRecord $revisionRecord = null;
 	private DOMDocument $dom;
 
-	/**
-	 * @param PermissionManager $permissionManager
-	 * @param RevisionRenderer $revisionRenderer
-	 */
 	public function __construct(
-		PermissionManager $permissionManager,
-		RevisionRenderer $revisionRenderer
+		private readonly PermissionManager $permissionManager,
+		private readonly RevisionRenderer $revisionRenderer,
+		private readonly TitleFactory $titleFactory,
+		private readonly WikiPageFactory $wikiPageFactory,
+		private readonly PageProps $pageProps,
+		private readonly Config $config,
+		private readonly Language $contentLanguage
 	) {
-		$this->permissionManager = $permissionManager;
-		$this->revisionRenderer = $revisionRenderer;
-		// @todo Inject this, when there is a good way to do that
-		$this->user = RequestContext::getMain()->getUser();
 	}
 
-	/**
-	 * @return Title|false Title or false if unable to retrieve title
-	 */
-	private function getTitle() {
+	private function getTitle(): ?Title {
 		if ( $this->title === null ) {
-			$this->title = Title::newFromID( $this->getPageId() ) ?? false;
+			$this->title = $this->titleFactory->newFromID( $this->getPageId() );
 		}
+
 		return $this->title;
 	}
 
-	/**
-	 * @return int
-	 */
-	private function getPageId() {
+	private function getPageId(): int {
 		if ( !isset( $this->pageId ) ) {
 			$this->pageId = (int)$this->getValidatedParams()['identifier'];
 		}
@@ -97,53 +63,36 @@ class RestApiGetContent extends SimpleHandler {
 		return $this->pageId;
 	}
 
-	/**
-	 * Get a wikipage record for this title
-	 * @return WikiPage|false
-	 */
-	private function getWikiPage() {
+	private function getWikiPage(): ?WikiPage {
 		if ( $this->wikiPage === null ) {
 			$title = $this->getTitle();
 			if ( !$title ) {
-				return false;
+				return null;
 			}
+
 			try {
-				if ( method_exists( MediaWikiServices::class, 'getWikiPageFactory' ) ) {
-					// MW 1.36+
-					$mwServices = MediaWikiServices::getInstance();
-					/** @noinspection PhpUndefinedMethodInspection */
-					$this->wikiPage = $mwServices->getWikiPageFactory()->newFromTitle( $title );
-				} else {
-					$this->wikiPage = WikiPage::factory( $title );
-				}
+				$this->wikiPage = $this->wikiPageFactory->newFromTitle( $title );
 			} catch ( MWException $e ) {
-				return false;
+				return null;
 			}
 		}
+
 		return $this->wikiPage;
 	}
 
-	/**
-	 * @return RevisionRecord|null
-	 */
 	private function getRevisionRecord(): ?RevisionRecord {
 		if ( $this->revisionRecord === null ) {
 			$wikiPage = $this->getWikiPage();
 			if ( !$wikiPage ) {
 				return null;
 			}
-			$this->revisionRecord = $this->getWikiPage()->getRevisionRecord();
+			$this->revisionRecord = $wikiPage->getRevisionRecord();
 		}
+
 		return $this->revisionRecord;
 	}
 
-	/**
-	 * @param int $page_id
-	 * @return array
-	 * @throws LocalizedHttpException
-	 * @throws HttpException
-	 */
-	public function run( int $page_id ) {
+	public function run( int $page_id ): array {
 		if ( !$page_id ) {
 			throw new HttpException( 'No page ID provided', 400 );
 		}
@@ -156,10 +105,15 @@ class RestApiGetContent extends SimpleHandler {
 		}
 
 		$titleObj = $this->getTitle();
-		if ( !ChatbotRagContent::isRelevantTitle( $titleObj ) ) {
+		if ( !ChatbotRagContent::isRelevantTitle(
+			$titleObj,
+			$this->pageProps,
+			$this->config,
+			$this->contentLanguage
+		) ) {
 			throw new HttpException( 'irrelevant title', 404 );
 		}
-		if ( !$this->permissionManager->userCan( 'read', $this->user, $titleObj ) ) {
+		if ( !$this->permissionManager->userCan( 'read', $this->getAuthority()->getUser(), $titleObj ) ) {
 			throw new LocalizedHttpException(
 				new MessageValue( 'rest-permission-denied-title',
 					[ new ScalarParam( ParamType::PLAINTEXT, $page_id ) ] ),
@@ -174,18 +128,16 @@ class RestApiGetContent extends SimpleHandler {
 		return $pageData;
 	}
 
-	/** @inheritDoc */
 	public function getParamSettings(): array {
 		return [
 			'identifier' => [
 				self::PARAM_SOURCE => 'path',
 				ParamValidator::PARAM_TYPE => 'integer',
 				ParamValidator::PARAM_REQUIRED => true,
-			]
+			],
 		];
 	}
 
-	/** @inheritDoc */
 	public function needsWriteAccess(): bool {
 		return false;
 	}
@@ -214,7 +166,7 @@ class RestApiGetContent extends SimpleHandler {
 	 * @return string the re-formatted text
 	 */
 	private function reformatEmailAndPhoneLinks( string $html ): string {
-		return preg_replace( '/<a\s+.*?href="(?:mailto|tel):([^"]+)"[^>]*>\1<\/a>/i', '(\1)', $html );
+		return preg_replace( '/<a\s+.*?href="(?:mailto|tel):([^"]+)"[^>]*>\1<\/a>/i', '(\1)', $html ) ?? $html;
 	}
 
 	/**
@@ -224,17 +176,20 @@ class RestApiGetContent extends SimpleHandler {
 	 * @return string the re-formatted text
 	 */
 	private function reformatLinks( string $html ): string {
-		return preg_replace_callback( '/<a\s+.*?href="([^"]+)"[^>]*>([^<]*)<\/a>/i',
-			'self::reformatLinksCallback', $html
-		);
+		return preg_replace_callback(
+			'/<a\s+.*?href="([^"]+)"[^>]*>([^<]*)<\/a>/i',
+			[ self::class, 'reformatLinksCallback' ],
+			$html
+		) ?? $html;
 	}
 
 	/**
 	 * Reformat how links are displayed
+	 *
 	 * @param array $matches
 	 * @return string
 	 */
-	public static function reformatLinksCallback( $matches ): string {
+	public static function reformatLinksCallback( array $matches ): string {
 		$url = str_replace( 'mailto:', '', $matches[1] );
 		return $matches[2] . ' (' . urldecode( $url ) . ')';
 	}
@@ -243,7 +198,7 @@ class RestApiGetContent extends SimpleHandler {
 	 * Make a DOMDocument from a fragment of HTML
 	 *
 	 * @param string $html The HTML fragment
-	 * @return DOMDocument $dom The DOMDocument instance.
+	 * @return DOMDocument The DOMDocument instance.
 	 */
 	private function getDomDocumentFromFragment( string $html ): DOMDocument {
 		libxml_use_internal_errors( true );
@@ -258,10 +213,9 @@ class RestApiGetContent extends SimpleHandler {
 
 	/**
 	 * Remove empty elements from a DOMDocument
-	 * @return void
 	 */
-	private function removeEmptyElements() {
-		$xpath = new \DOMXPath( $this->dom );
+	private function removeEmptyElements(): void {
+		$xpath = new DOMXPath( $this->dom );
 		// phpcs:ignore Generic.CodeAnalysis.AssignmentInCondition.FoundInWhileCondition
 		while ( ( $node_list = $xpath->query( '//*[not(*) and not(@*) and not(text()[normalize-space()])]' ) )
 			&& $node_list->length
@@ -280,12 +234,12 @@ class RestApiGetContent extends SimpleHandler {
 	 */
 	private function getElementContentBySelector( string $selector ): string {
 		$converter = new CssSelectorConverter();
-		$xpath = new \DOMXpath( $this->dom );
+		$xpath = new DOMXPath( $this->dom );
 		$elements = $xpath->query( $converter->toXPath( $selector ) );
 		if ( $elements->length > 0 ) {
 			$element = $elements->item( 0 );
 			$content = $this->dom->saveHTML( $element );
-			return $content;
+			return $content !== false ? $content : '';
 		}
 
 		return '';
@@ -298,7 +252,7 @@ class RestApiGetContent extends SimpleHandler {
 	 */
 	private function removeElementsBySelector( string $selector ): void {
 		$converter = new CssSelectorConverter();
-		$xpath = new DOMXpath( $this->dom );
+		$xpath = new DOMXPath( $this->dom );
 		$elements = $xpath->query( $converter->toXPath( $selector ) );
 		foreach ( $elements as $element ) {
 			$element->parentNode->removeChild( $element );
@@ -306,9 +260,9 @@ class RestApiGetContent extends SimpleHandler {
 	}
 
 	/**
-	 * @return array of category names
+	 * @return string[]
 	 */
-	private function getOnlyVisibleCategories() {
+	private function getOnlyVisibleCategories(): array {
 		$categories = iterator_to_array( $this->getWikiPage()->getCategories() );
 		$hiddenCategories = $this->getWikiPage()->getHiddenCategories();
 		$visibleCategories = array_diff( $categories, $hiddenCategories );
@@ -327,15 +281,21 @@ class RestApiGetContent extends SimpleHandler {
 	 * @return array
 	 * @throws MWException
 	 */
-	private function getPageData() {
-		$renderedRevision = $this->revisionRenderer->getRenderedRevision( $this->getRevisionRecord() );
+	private function getPageData(): array {
+		$wikiPage = $this->getWikiPage();
+		$revisionRecord = $this->getRevisionRecord();
+		if ( !$wikiPage || !$revisionRecord ) {
+			throw new MWException( 'Could not get WikiPage or RevisionRecord' );
+		}
+
+		$renderedRevision = $this->revisionRenderer->getRenderedRevision( $revisionRecord );
 		$parserOutput = $renderedRevision->getRevisionParserOutput();
 		$pageHtml = $parserOutput->getText( [ 'allowTOC' => false, 'enableSectionEditLinks' => false ] );
 
 		$categories = $this->getOnlyVisibleCategories();
 
 		// Remove comments before further processing using DOM
-		$pageHtml = preg_replace( '/<!--[\s\S]*?-->/', '', $pageHtml );
+		$pageHtml = preg_replace( '/<!--[\s\S]*?-->/', '', $pageHtml ) ?? $pageHtml;
 		$this->dom = $this->getDomDocumentFromFragment( $pageHtml );
 
 		// Extract the summary content
@@ -364,13 +324,6 @@ class RestApiGetContent extends SimpleHandler {
 		$articleType = ArticleType::getReadableArticleTypeFromCode( $articleTypeCode, 2 );
 		$articleContentArea = ArticleContentArea::getArticleContentArea( $this->getTitle() ) ?? 'unknown';
 
-		try {
-			$wikiPage = $this->getWikiPage();
-			$revisionRecord = $this->getRevisionRecord();
-		} catch ( MWException $e ) {
-			throw new MWException( 'Could not get WikiPage or RevisionRecord' );
-		}
-
 		return [
 			'page_id' => $wikiPage->getId(),
 			'title' => $this->getTitle()->getFullText(),
@@ -383,8 +336,7 @@ class RestApiGetContent extends SimpleHandler {
 			'contentHtml' => trim( $processedHtml ),
 			'categories' => $categories,
 			'revision_id' => $revisionRecord->getId(),
-			'revision_date' => $revisionRecord->getTimestamp()
+			'revision_date' => $revisionRecord->getTimestamp(),
 		];
 	}
-
 }

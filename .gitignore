@@ -2,3 +2,6 @@
 /vendor
 /node_modules
 .eslintcache
+/.stylelintcache
+.phpunit.result.cache
+.DS_Store

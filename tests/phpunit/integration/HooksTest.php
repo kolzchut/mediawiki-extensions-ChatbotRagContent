@@ -5,10 +5,9 @@ namespace MediaWiki\Extension\ChatbotRagContent\Tests\Integration;
 use JobQueueGroup;
 use MediaWiki\Extension\ChatbotRagContent\Hooks;
 use MediaWiki\Extension\ChatbotRagContent\RagUpdateJob;
-use MediaWiki\MediaWikiServices;
 use MediaWiki\Revision\RevisionRecord;
+use MediaWiki\Title\TitleFactory;
 use MediaWikiIntegrationTestCase;
-use Title;
 
 /**
  * @covers \MediaWiki\Extension\ChatbotRagContent\Hooks
@@ -19,22 +18,40 @@ class HooksTest extends MediaWikiIntegrationTestCase {
 	protected function setUp(): void {
 		parent::setUp();
 
-		$this->setMwGlobals( [
-			'wgChatbotRagContentPingURL' => 'https://example.com/ping',
-			'wgChatbotRagContentNamespaces' => [ NS_MAIN ],
-			'wgChatbotRagContentArticleTypeBlocklist' => [],
-			'wgChatbotRagContentTitleAllowlist' => []
+		$this->overrideConfigValues( [
+			'ChatbotRagContentPingURL' => 'https://example.com/ping',
+			'ChatbotRagContentNamespaces' => [ NS_MAIN ],
+			'ChatbotRagContentArticleTypeBlocklist' => [],
+			'ChatbotRagContentTitleAllowlist' => [],
 		] );
+	}
+
+	private function newHooks(): Hooks {
+		$services = $this->getServiceContainer();
+
+		return new Hooks(
+			$services->getMainConfig(),
+			$services->getJobQueueGroup(),
+			$services->getTitleFactory(),
+			$services->getPageProps(),
+			$services->getContentLanguage()
+		);
+	}
+
+	private function getJobQueueGroup(): JobQueueGroup {
+		return $this->getServiceContainer()->getJobQueueGroup();
+	}
+
+	private function getTitleFactory(): TitleFactory {
+		return $this->getServiceContainer()->getTitleFactory();
 	}
 
 	public function testOnPageDeletionDataUpdatesPassesRevisionDataToJob() {
 		// Create a test page
-		$page = $this->insertPage( 'TestPageForDeletion', 'Content to be deleted' );
-		$title = Title::newFromText( 'TestPageForDeletion' );
+		$this->insertPage( 'TestPageForDeletion', 'Content to be deleted' );
+		$title = $this->getTitleFactory()->newFromText( 'TestPageForDeletion' );
 
-		// Get the revision (MW 1.35 compatibility)
-		$services = MediaWikiServices::getInstance();
-		$revisionRecord = $services->getRevisionLookup()
+		$revisionRecord = $this->getServiceContainer()->getRevisionLookup()
 			->getRevisionByTitle( $title );
 
 		$this->assertInstanceOf(
@@ -43,17 +60,13 @@ class HooksTest extends MediaWikiIntegrationTestCase {
 			'Should have a valid revision'
 		);
 
-		// Create a spy to capture the job (MW 1.35 compatibility)
-		// We'll check the job queue directly instead of mocking
-		$jobQueue = method_exists( MediaWikiServices::class, 'getJobQueueGroup' )
-			? MediaWikiServices::getInstance()->getJobQueueGroup()
-			: JobQueueGroup::singleton();
+		$jobQueue = $this->getJobQueueGroup();
 
 		// Clear any existing jobs
 		$jobQueue->get( 'ragUpdate' )->delete();
 
 		// Call the hook
-		$hooks = new Hooks();
+		$hooks = $this->newHooks();
 		$updates = [];
 		$hooks->onPageDeletionDataUpdates( $title, $revisionRecord, $updates );
 
@@ -94,19 +107,17 @@ class HooksTest extends MediaWikiIntegrationTestCase {
 
 	public function testOnPageDeletionDataUpdatesHandlesNullRevision() {
 		// Create a real page first, so it passes the exists() check
-		$page = $this->insertPage( 'PageWithNullRevision', 'Content' );
-		$title = Title::newFromText( 'PageWithNullRevision' );
+		$this->insertPage( 'PageWithNullRevision', 'Content' );
+		$title = $this->getTitleFactory()->newFromText( 'PageWithNullRevision' );
 
 		// Get job queue
-		$jobQueue = method_exists( MediaWikiServices::class, 'getJobQueueGroup' )
-			? MediaWikiServices::getInstance()->getJobQueueGroup()
-			: JobQueueGroup::singleton();
+		$jobQueue = $this->getJobQueueGroup();
 
 		// Clear any existing jobs (including one from insertPage)
 		$jobQueue->get( 'ragUpdate' )->delete();
 
 		// Call the hook with null revision
-		$hooks = new Hooks();
+		$hooks = $this->newHooks();
 		$updates = [];
 		$hooks->onPageDeletionDataUpdates( $title, null, $updates );
 
@@ -132,27 +143,24 @@ class HooksTest extends MediaWikiIntegrationTestCase {
 
 	public function testOnPageDeletionDataUpdatesRespectsNamespaceConfiguration() {
 		// Set config to only allow NS_HELP
-		$this->setMwGlobals( [
-			'wgChatbotRagContentNamespaces' => [ NS_HELP ]
+		$this->overrideConfigValues( [
+			'ChatbotRagContentNamespaces' => [ NS_HELP ],
 		] );
 
 		// Create a page in NS_MAIN (not allowed)
-		$page = $this->insertPage( 'MainPageForDeletion', 'Content' );
-		$title = Title::newFromText( 'MainPageForDeletion' );
-		$services = MediaWikiServices::getInstance();
-		$revisionRecord = $services->getRevisionLookup()
+		$this->insertPage( 'MainPageForDeletion', 'Content' );
+		$title = $this->getTitleFactory()->newFromText( 'MainPageForDeletion' );
+		$revisionRecord = $this->getServiceContainer()->getRevisionLookup()
 			->getRevisionByTitle( $title );
 
 		// Get job queue
-		$jobQueue = method_exists( MediaWikiServices::class, 'getJobQueueGroup' )
-			? MediaWikiServices::getInstance()->getJobQueueGroup()
-			: JobQueueGroup::singleton();
+		$jobQueue = $this->getJobQueueGroup();
 
 		// Clear any existing jobs
 		$jobQueue->get( 'ragUpdate' )->delete();
 
 		// Call the hook
-		$hooks = new Hooks();
+		$hooks = $this->newHooks();
 		$updates = [];
 		$hooks->onPageDeletionDataUpdates( $title, $revisionRecord, $updates );
 
@@ -163,19 +171,17 @@ class HooksTest extends MediaWikiIntegrationTestCase {
 
 	public function testOnRevisionDataUpdatesCreatesJob() {
 		// Create a test page
-		$page = $this->insertPage( 'TestPageForUpdate', 'Updated content' );
-		$title = Title::newFromText( 'TestPageForUpdate' );
+		$this->insertPage( 'TestPageForUpdate', 'Updated content' );
+		$title = $this->getTitleFactory()->newFromText( 'TestPageForUpdate' );
 
 		// Get job queue
-		$jobQueue = method_exists( MediaWikiServices::class, 'getJobQueueGroup' )
-			? MediaWikiServices::getInstance()->getJobQueueGroup()
-			: JobQueueGroup::singleton();
+		$jobQueue = $this->getJobQueueGroup();
 
 		// Clear any existing jobs
 		$jobQueue->get( 'ragUpdate' )->delete();
 
 		// Call the hook
-		$hooks = new Hooks();
+		$hooks = $this->newHooks();
 		$updates = [];
 		$hooks->onRevisionDataUpdates( $title, null, $updates );
 
@@ -190,24 +196,22 @@ class HooksTest extends MediaWikiIntegrationTestCase {
 
 	public function testOnPageMoveCompleteCreatesJobWhenMovingInOrOutOfAllowedNamespace() {
 		// Create a page in NS_MAIN (allowed)
-		$page = $this->insertPage( 'PageToMove', 'Content to move' );
-		$oldTitle = Title::newFromText( 'PageToMove' );
+		$this->insertPage( 'PageToMove', 'Content to move' );
+		$oldTitle = $this->getTitleFactory()->newFromText( 'PageToMove' );
 
 		// Create the destination page to simulate post-move state
 		// (The hook is called after the move is complete, so the new page exists)
 		$this->insertPage( 'Template:MovedPage', 'Content to move' );
-		$newTitle = Title::newFromText( 'Template:MovedPage' );
+		$newTitle = $this->getTitleFactory()->newFromText( 'Template:MovedPage' );
 
 		// Get job queue
-		$jobQueue = method_exists( MediaWikiServices::class, 'getJobQueueGroup' )
-			? MediaWikiServices::getInstance()->getJobQueueGroup()
-			: JobQueueGroup::singleton();
+		$jobQueue = $this->getJobQueueGroup();
 
 		// Clear any existing jobs (from both insertPage calls)
 		$jobQueue->get( 'ragUpdate' )->delete();
 
 		// Call the hook
-		$hooks = new Hooks();
+		$hooks = $this->newHooks();
 		$hooks->onPageMoveComplete(
 			$oldTitle,
 			$newTitle,
@@ -230,23 +234,21 @@ class HooksTest extends MediaWikiIntegrationTestCase {
 
 	public function testHooksDoNotCreateJobWhenPingUrlNotConfigured() {
 		// Disable ping URL
-		$this->setMwGlobals( [
-			'wgChatbotRagContentPingURL' => ''
+		$this->overrideConfigValues( [
+			'ChatbotRagContentPingURL' => '',
 		] );
 
-		$page = $this->insertPage( 'TestPageNoPing', 'Content' );
-		$title = Title::newFromText( 'TestPageNoPing' );
+		$this->insertPage( 'TestPageNoPing', 'Content' );
+		$title = $this->getTitleFactory()->newFromText( 'TestPageNoPing' );
 
 		// Get job queue
-		$jobQueue = method_exists( MediaWikiServices::class, 'getJobQueueGroup' )
-			? MediaWikiServices::getInstance()->getJobQueueGroup()
-			: JobQueueGroup::singleton();
+		$jobQueue = $this->getJobQueueGroup();
 
 		// Clear any existing jobs
 		$jobQueue->get( 'ragUpdate' )->delete();
 
 		// Call the hook
-		$hooks = new Hooks();
+		$hooks = $this->newHooks();
 		$updates = [];
 		$hooks->onRevisionDataUpdates( $title, null, $updates );
 

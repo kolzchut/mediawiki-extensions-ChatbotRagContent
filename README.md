@@ -8,7 +8,6 @@ Kol-Zchut and Webix, and as such, the data format is probably not universally us
 
 [Document update flow by Webix](https://docs.google.com/document/d/1igsU6L2FJpWn6rYBwJfLLXwGUYq0vJpmvh6VZv86cn8/edit#heading=h.g0tflggr4vs3)
 
-
 ## Configuration options
 | Name                                     | values                 | Role                                                         |
 |------------------------------------------|------------------------|--------------------------------------------------------------|
@@ -21,9 +20,9 @@ Kol-Zchut and Webix, and as such, the data format is probably not universally us
 The data will be sent as JSON to the specified URL, in the following format:
 ```json
 {
-    "page_id": 3,
-    "rev_id": 13500,
-    "callback_url": "https://example.com/w/rest.php/cbragcontent/v0/page_id/"
+     "page_id": 3,
+     "revision_id": 13500,
+     "callback_url": "https://example.com/w/rest.php/cbragcontent/v0/page_id/"
 }
 ```
 ## API for content retrieval
@@ -47,3 +46,11 @@ anywhere in the page's wikitext. This also adds the page to the `Pages excluded 
 This page should not be included in RAG.
 __EXCLUDE_FROM_RAG__
 ```
+
+## Changelog
+
+### 0.0.4
+- Modernized the hook and REST wiring to use explicit service injection instead of service-locator lookups.
+- Updated the title relevance checks and integration tests to use the refactored constructors and modern TitleFactory-based calls.
+
+

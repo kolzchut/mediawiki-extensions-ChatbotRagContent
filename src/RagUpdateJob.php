@@ -21,9 +21,10 @@
 namespace MediaWiki\Extension\ChatbotRagContent;
 
 use Job;
+use MediaWiki\Config\Config;
 use MediaWiki\Logger\LoggerFactory;
 use MediaWiki\MediaWikiServices;
-use Title;
+use MediaWiki\Title\Title;
 
 /**
  * Job to notify a remote server about page updates
@@ -44,7 +45,8 @@ class RagUpdateJob extends Job {
 	 */
 	public function run(): bool {
 		$services = MediaWikiServices::getInstance();
-		$url = $services->getMainConfig()->get( 'ChatbotRagContentPingURL' );
+		$config = $services->getMainConfig();
+		$url = $config->get( 'ChatbotRagContentPingURL' );
 		$logger = LoggerFactory::getInstance( 'ChatbotRagContent' );
 
 		// Use revision data from params if provided (e.g., for deletions)
@@ -54,9 +56,13 @@ class RagUpdateJob extends Job {
 			$revTimestamp = $this->params['revision_date'];
 			$pageId = $this->params['page_id'];
 		} else {
-			$revId = $this->getTitle()->getLatestRevID();
-			$revTimestamp = $services->getRevisionLookup()->getTimestampFromId( $revId );
-			$pageId = $this->getTitle()->getId();
+			$title = $this->getTitle();
+			// canExist() is false for link-target-only Titles (e.g. special pages, or
+			// makeTitle()'d shells). Skip the DB lookups in that case — the validation
+			// below will catch the zero values and bail with a proper error.
+			$revId = $title->canExist() ? $title->getLatestRevID() : 0;
+			$revTimestamp = $revId ? $services->getRevisionLookup()->getTimestampFromId( $revId ) : false;
+			$pageId = $title->canExist() ? $title->getId() : 0;
 		}
 
 		// Validate that we have valid revision data before sending
@@ -76,13 +82,13 @@ class RagUpdateJob extends Job {
 			'page_id' => $pageId,
 			'revision_id' => $revId,
 			'revision_date' => $revTimestamp,
-			'callback_url' => self::getRestApiUrl()
+			'callback_url' => $this->getRestApiUrl( $config ),
 		];
 
-		$request = MediaWikiServices::getInstance()->getHttpRequestFactory()
+		$request = $services->getHttpRequestFactory()
 			->create( $url, [
 				'method' => 'POST',
-				'postData' => json_encode( $data )
+				'postData' => json_encode( $data ),
 			] );
 		$request->setHeader( 'Content-Type', 'application/json' );
 		$status = $request->execute();
@@ -108,10 +114,10 @@ class RagUpdateJob extends Job {
 	/**
 	 * Compose a full URL to the REST API endpoint, so we can send it with the pingback
 	 *
+	 * @param Config $config
 	 * @return string
 	 */
-	private static function getRestApiUrl(): string {
-		$config = MediaWikiServices::getInstance()->getMainConfig();
+	private function getRestApiUrl( Config $config ): string {
 		$server = $config->get( 'Server' );
 		$path = $config->get( 'RestPath' );
 

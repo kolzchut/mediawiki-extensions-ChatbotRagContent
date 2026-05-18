@@ -2,41 +2,42 @@
 
 namespace MediaWiki\Extension\ChatbotRagContent\Tests\Integration;
 
-use HashConfig;
 use Language;
+use MediaWiki\Config\Config;
 use MediaWiki\Extension\ChatbotRagContent\ChatbotRagContent;
+use MediaWiki\Title\Title;
 use MediaWikiIntegrationTestCase;
-use Title;
+use PageProps;
 
 /**
  * @covers \MediaWiki\Extension\ChatbotRagContent\ChatbotRagContent::isRelevantTitle
  */
 class ChatbotRagContentTest extends MediaWikiIntegrationTestCase {
 
-	/**
-	 * @throws \Exception
-	 */
 	protected function setUp(): void {
 		parent::setUp();
 
-		// Set up the test configuration
-		$testConfig = new HashConfig( [
+		$this->overrideConfigValues( [
+			'LanguageCode' => 'en',
 			'ChatbotRagContentTitleAllowlist' => [ 'Allowed Page' ],
 			'ChatbotRagContentNamespaces' => [ NS_MAIN, NS_HELP ],
-			'ChatbotRagContentArticleTypeBlocklist' => [ 'blocked_type' ]
-		] );
-
-		// Set wiki language to English
-		$this->setMwGlobals( [
-			'wgLanguageCode' => 'en',
-			'wgChatbotRagContentTitleAllowlist' => [ 'Allowed Page' ],
-			'wgChatbotRagContentNamespaces' => [ NS_MAIN, NS_HELP ],
-			'wgChatbotRagContentArticleTypeBlocklist' => [ 'blocked_type' ]
+			'ChatbotRagContentArticleTypeBlocklist' => [ 'blocked_type' ],
 		] );
 	}
 
-	protected function tearDown(): void {
-		parent::tearDown();
+	private function getTestConfig(): Config {
+		return $this->getServiceContainer()->getMainConfig();
+	}
+
+	private function getTestContentLanguage(): Language {
+		return $this->getServiceContainer()->getContentLanguage();
+	}
+
+	private function newPagePropsMock( array $properties = [] ): PageProps {
+		$pageProps = $this->createMock( PageProps::class );
+		$pageProps->method( 'getProperties' )->willReturn( $properties );
+
+		return $pageProps;
 	}
 
 	public function testIsRelevantTitleReturnsFalseForNonexistentPage() {
@@ -44,7 +45,12 @@ class ChatbotRagContentTest extends MediaWikiIntegrationTestCase {
 		$title->method( 'exists' )->willReturn( false );
 
 		$this->assertFalse(
-			ChatbotRagContent::isRelevantTitle( $title ),
+			ChatbotRagContent::isRelevantTitle(
+				$title,
+				$this->newPagePropsMock(),
+				$this->getTestConfig(),
+				$this->getTestContentLanguage()
+			),
 			'Non-existent pages should not be relevant'
 		);
 	}
@@ -55,13 +61,18 @@ class ChatbotRagContentTest extends MediaWikiIntegrationTestCase {
 		$title->method( 'isRedirect' )->willReturn( true );
 
 		$this->assertFalse(
-			ChatbotRagContent::isRelevantTitle( $title ),
+			ChatbotRagContent::isRelevantTitle(
+				$title,
+				$this->newPagePropsMock(),
+				$this->getTestConfig(),
+				$this->getTestContentLanguage()
+			),
 			'Redirect pages should not be relevant'
 		);
 	}
 
 	public function testIsRelevantTitleReturnsFalseForDifferentLanguage() {
-		$frLanguage = Language::factory( 'fr' );
+		$frLanguage = $this->getServiceContainer()->getLanguageFactory()->getLanguage( 'fr' );
 
 		$title = $this->createMock( Title::class );
 		$title->method( 'exists' )->willReturn( true );
@@ -69,7 +80,12 @@ class ChatbotRagContentTest extends MediaWikiIntegrationTestCase {
 		$title->method( 'getPageLanguage' )->willReturn( $frLanguage );
 
 		$this->assertFalse(
-			ChatbotRagContent::isRelevantTitle( $title ),
+			ChatbotRagContent::isRelevantTitle(
+				$title,
+				$this->newPagePropsMock(),
+				$this->getTestConfig(),
+				$this->getTestContentLanguage()
+			),
 			'Pages in different languages should not be relevant'
 		);
 	}
@@ -79,11 +95,16 @@ class ChatbotRagContentTest extends MediaWikiIntegrationTestCase {
 		$title->method( 'exists' )->willReturn( true );
 		$title->method( 'isRedirect' )->willReturn( false );
 		$title->method( 'getPageLanguage' )
-			->willReturn( Language::factory( 'en' ) );
+			->willReturn( $this->getTestContentLanguage() );
 		$title->method( 'isWikitextPage' )->willReturn( false );
 
 		$this->assertFalse(
-			ChatbotRagContent::isRelevantTitle( $title ),
+			ChatbotRagContent::isRelevantTitle(
+				$title,
+				$this->newPagePropsMock(),
+				$this->getTestConfig(),
+				$this->getTestContentLanguage()
+			),
 			'Non-wikitext pages should not be relevant'
 		);
 	}
@@ -93,12 +114,17 @@ class ChatbotRagContentTest extends MediaWikiIntegrationTestCase {
 		$title->method( 'exists' )->willReturn( true );
 		$title->method( 'isRedirect' )->willReturn( false );
 		$title->method( 'getPageLanguage' )
-			->willReturn( Language::factory( 'en' ) );
+			->willReturn( $this->getTestContentLanguage() );
 		$title->method( 'isWikitextPage' )->willReturn( true );
 		$title->method( 'getFullText' )->willReturn( 'Allowed Page' );
 
 		$this->assertTrue(
-			ChatbotRagContent::isRelevantTitle( $title ),
+			ChatbotRagContent::isRelevantTitle(
+				$title,
+				$this->newPagePropsMock(),
+				$this->getTestConfig(),
+				$this->getTestContentLanguage()
+			),
 			'Allowlisted pages should be relevant'
 		);
 	}
@@ -108,13 +134,18 @@ class ChatbotRagContentTest extends MediaWikiIntegrationTestCase {
 		$title->method( 'exists' )->willReturn( true );
 		$title->method( 'isRedirect' )->willReturn( false );
 		$title->method( 'getPageLanguage' )
-			->willReturn( Language::factory( 'en' ) );
+			->willReturn( $this->getTestContentLanguage() );
 		$title->method( 'isWikitextPage' )->willReturn( true );
 		$title->method( 'getFullText' )->willReturn( 'Some Page' );
 		$title->method( 'getNamespace' )->willReturn( NS_TEMPLATE );
 
 		$this->assertFalse(
-			ChatbotRagContent::isRelevantTitle( $title ),
+			ChatbotRagContent::isRelevantTitle(
+				$title,
+				$this->newPagePropsMock(),
+				$this->getTestConfig(),
+				$this->getTestContentLanguage()
+			),
 			'Pages in disallowed namespaces should not be relevant'
 		);
 	}
@@ -124,13 +155,19 @@ class ChatbotRagContentTest extends MediaWikiIntegrationTestCase {
 		$title->method( 'exists' )->willReturn( true );
 		$title->method( 'isRedirect' )->willReturn( false );
 		$title->method( 'getPageLanguage' )
-			->willReturn( Language::factory( 'en' ) );
+			->willReturn( $this->getTestContentLanguage() );
 		$title->method( 'isWikitextPage' )->willReturn( true );
 		$title->method( 'getFullText' )->willReturn( 'Template Page' );
 		$title->method( 'getNamespace' )->willReturn( NS_TEMPLATE );
 
 		$this->assertTrue(
-			ChatbotRagContent::isRelevantTitle( $title, true ),
+			ChatbotRagContent::isRelevantTitle(
+				$title,
+				$this->newPagePropsMock(),
+				$this->getTestConfig(),
+				$this->getTestContentLanguage(),
+				true
+			),
 			'Pages should be relevant when namespace check is ignored'
 		);
 	}
@@ -140,24 +177,18 @@ class ChatbotRagContentTest extends MediaWikiIntegrationTestCase {
 		$title->method( 'exists' )->willReturn( true );
 		$title->method( 'isRedirect' )->willReturn( false );
 		$title->method( 'getPageLanguage' )
-			->willReturn( Language::factory( 'en' ) );
+			->willReturn( $this->getTestContentLanguage() );
 		$title->method( 'isWikitextPage' )->willReturn( true );
 		$title->method( 'getFullText' )->willReturn( 'Some Page' );
 		$title->method( 'getNamespace' )->willReturn( NS_MAIN );
 
-		// Mock the PageProps singleton to simulate the exclude_from_rag property
-		$mockPageProps = $this->createMock( \PageProps::class );
-		$mockPageProps->method( 'getProperties' )
-			->with( $title, 'exclude_from_rag' )
-			->willReturn( [ 'exclude_from_rag' => true ] );
-
-		// Use reflection to set the singleton instance (MW 1.35 compatibility)
-		$ref = new \ReflectionProperty( \PageProps::class, 'instance' );
-		$ref->setAccessible( true );
-		$ref->setValue( $mockPageProps );
-
 		$this->assertFalse(
-			\MediaWiki\Extension\ChatbotRagContent\ChatbotRagContent::isRelevantTitle( $title ),
+			ChatbotRagContent::isRelevantTitle(
+				$title,
+				$this->newPagePropsMock( [ 'exclude_from_rag' => true ] ),
+				$this->getTestConfig(),
+				$this->getTestContentLanguage()
+			),
 			'Pages with __EXCLUDE_FROM_RAG__ magic word should not be relevant'
 		);
 	}

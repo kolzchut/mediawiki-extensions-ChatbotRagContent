@@ -1,18 +1,6 @@
 <?php
 /**
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * @license GPL-2.0-or-later
  *
  * @file
  */
@@ -20,33 +8,41 @@
 namespace MediaWiki\Extension\ChatbotRagContent;
 
 use JobQueueGroup;
+use Language;
+use MediaWiki\Config\Config;
 use MediaWiki\Hook\GetDoubleUnderscoreIDsHook;
+use MediaWiki\Hook\PageMoveCompleteHook;
 use MediaWiki\Hook\ParserAfterParseHook;
-use MediaWiki\MediaWikiServices;
-use Title;
+use MediaWiki\Page\Hook\PageDeletionDataUpdatesHook;
+use MediaWiki\Storage\Hook\RevisionDataUpdatesHook;
+use MediaWiki\Title\Title;
+use MediaWiki\Title\TitleFactory;
+use PageProps;
 
 class Hooks implements
-	\MediaWiki\Storage\Hook\RevisionDataUpdatesHook,
-	\MediaWiki\Page\Hook\PageDeletionDataUpdatesHook,
-	\MediaWiki\Hook\PageMoveCompleteHook,
+	RevisionDataUpdatesHook,
+	PageDeletionDataUpdatesHook,
+	PageMoveCompleteHook,
 	GetDoubleUnderscoreIDsHook,
 	ParserAfterParseHook
 {
-
-	/**
-	 * @inheritDoc
-	 */
-	public function onRevisionDataUpdates( $title, $renderedRevision, &$updates ) {
-		self::pushNewJob( $title );
+	public function __construct(
+		private readonly Config $config,
+		private readonly JobQueueGroup $jobQueueGroup,
+		private readonly TitleFactory $titleFactory,
+		private readonly PageProps $pageProps,
+		private readonly Language $contentLanguage
+	) {
 	}
 
-	/**
-	 * @inheritDoc
-	 */
+	/** @inheritDoc */
+	public function onRevisionDataUpdates( $title, $renderedRevision, &$updates ) {
+		$this->pushNewJob( $title );
+	}
+
+	/** @inheritDoc */
 	public function onPageDeletionDataUpdates( $title, $revision, &$updates ) {
-		$services = MediaWikiServices::getInstance();
-		$config = $services->getMainConfig();
-		$url = $config->get( 'ChatbotRagContentPingURL' );
+		$url = $this->config->get( 'ChatbotRagContentPingURL' );
 
 		if ( !$url ) {
 			return;
@@ -57,9 +53,12 @@ class Hooks implements
 		// since the page is being deleted. The RAG backend will handle spurious
 		// notifications gracefully: when it fetches the page and gets a 404, it will
 		// either remove it from the index (if indexed) or ignore it (if not).
-		$allowlist = $config->get( 'ChatbotRagContentTitleAllowlist' );
-		$inAllowlist = in_array( $title->getFullText(), $allowlist );
-		$inAllowedNamespace = ChatbotRagContent::isAllowedNamespace( $title->getNamespace() );
+		$allowlist = $this->config->get( 'ChatbotRagContentTitleAllowlist' );
+		$inAllowlist = in_array( $title->getFullText(), $allowlist, true );
+		$inAllowedNamespace = ChatbotRagContent::isAllowedNamespace(
+			$title->getNamespace(),
+			$this->config
+		);
 
 		if ( !$inAllowlist && !$inAllowedNamespace ) {
 			return;
@@ -73,38 +72,31 @@ class Hooks implements
 			$params['revision_date'] = $revision->getTimestamp();
 		}
 
-		// Create job directly without going through pushNewJob to avoid exists() check
-		$jobQueue = $services->getJobQueueGroup();
-
-		$job = new RagUpdateJob( $title, $params );
-		$jobQueue->push( $job );
+		// Create job directly without going through pushNewJob to avoid exists() check.
+		$this->jobQueueGroup->push( new RagUpdateJob( $title, $params ) );
 	}
 
-	/**
-	 * @inheritDoc
-	 */
+	/** @inheritDoc */
 	public function onPageMoveComplete( $old, $new, $user, $pageid, $redirid, $reason, $revision ) {
-		$oldNamespaceAllowed = ChatbotRagContent::isAllowedNamespace( $old->getNamespace() );
-		$newNamespaceAllowed = ChatbotRagContent::isAllowedNamespace( $new->getNamespace() );
+		$oldNamespaceAllowed = ChatbotRagContent::isAllowedNamespace( $old->getNamespace(), $this->config );
+		$newNamespaceAllowed = ChatbotRagContent::isAllowedNamespace( $new->getNamespace(), $this->config );
 
-		if ( $oldNamespaceAllowed | $newNamespaceAllowed ) {
+		if ( $oldNamespaceAllowed || $newNamespaceAllowed ) {
 			// Page moved in or out of an allowed namespace
-			self::pushNewJob( Title::newFromLinkTarget( $new ), true );
+			$this->pushNewJob( $this->titleFactory->newFromLinkTarget( $new ), true );
 		}
 	}
 
 	/**
 	 * Register the EXCLUDE_FROM_RAG magic word as a behavior switch
-	 * @param string[] &$ids
+	 *
+	 * @param string[] &$doubleUnderscoreIDs
 	 */
-	public function onGetDoubleUnderscoreIDs( &$ids ) {
-		$ids[] = 'exclude_from_rag';
+	public function onGetDoubleUnderscoreIDs( &$doubleUnderscoreIDs ) {
+		$doubleUnderscoreIDs[] = 'exclude_from_rag';
 	}
 
-	/**
-	 * Add tracking category for pages using __EXCLUDE_FROM_RAG__
-	 * @inheritDoc
-	 */
+	/** @inheritDoc */
 	public function onParserAfterParse( $parser, &$text, $stripState ) {
 		// Check if the property exists and is not false
 		// getProperty() returns false when property doesn't exist (not null)
@@ -113,24 +105,24 @@ class Hooks implements
 		}
 	}
 
-	/**
-	 * @param Title $title
-	 * @param bool $ignoreNamespaceCheck
-	 * @param array $params Additional parameters to pass to the job
-	 * @return bool
-	 */
-	private static function pushNewJob( $title, bool $ignoreNamespaceCheck = false, array $params = [] ): bool {
-		$services = MediaWikiServices::getInstance();
-		$url = $services->getMainConfig()->get( 'ChatbotRagContentPingURL' );
+	private function pushNewJob(
+		Title $title,
+		bool $ignoreNamespaceCheck = false,
+		array $params = []
+	): bool {
+		$url = $this->config->get( 'ChatbotRagContentPingURL' );
 
-		if ( !$url || !ChatbotRagContent::isRelevantTitle( $title, $ignoreNamespaceCheck ) ) {
+		if ( !$url || !ChatbotRagContent::isRelevantTitle(
+			$title,
+			$this->pageProps,
+			$this->config,
+			$this->contentLanguage,
+			$ignoreNamespaceCheck
+		) ) {
 			return false;
 		}
 
-		$jobQueue = MediaWikiServices::getInstance()->getJobQueueGroup();
-
-		$job = new RagUpdateJob( $title, $params );
-		$jobQueue->push( $job );
+		$this->jobQueueGroup->push( new RagUpdateJob( $title, $params ) );
 
 		return true;
 	}

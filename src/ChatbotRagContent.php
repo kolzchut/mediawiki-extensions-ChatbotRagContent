@@ -2,85 +2,64 @@
 
 namespace MediaWiki\Extension\ChatbotRagContent;
 
-use MediaWiki\MediaWikiServices;
+use Language;
+use MediaWiki\Config\Config;
+use MediaWiki\Title\Title;
 use PageProps;
-use Title;
 
 class ChatbotRagContent {
-	/**
-	 * @param Title $title
-	 * @param bool $ignoreNamespaceCheck
-	 * @return bool
-	 */
-	public static function isRelevantTitle( Title $title, bool $ignoreNamespaceCheck = false ): bool {
+	public static function isRelevantTitle(
+		Title $title,
+		PageProps $pageProps,
+		Config $config,
+		Language $contentLanguage,
+		bool $ignoreNamespaceCheck = false
+	): bool {
 		if ( !$title->exists() ||
 			$title->isRedirect() ||
-			!self::isInWikiLanguage( $title ) ||
+			!self::isInWikiLanguage( $title, $contentLanguage ) ||
 			!$title->isWikitextPage()
 		) {
 			return false;
 		}
 
 		// Exclude if the EXCLUDE_FROM_RAG magic word is set (via page property)
-		$pageProps = MediaWikiServices::getInstance()->getPageProps();
 		$propArray = $pageProps->getProperties( $title, 'exclude_from_rag' );
 		$property = empty( $propArray ) ? null : array_values( $propArray )[0];
 		if ( $property !== null ) {
 			return false;
 		}
 
-		$config = MediaWikiServices::getInstance()->getMainConfig();
-
 		$allowlist = $config->get( 'ChatbotRagContentTitleAllowlist' );
-		if ( in_array( $title->getFullText(), $allowlist ) ) {
+		if ( in_array( $title->getFullText(), $allowlist, true ) ) {
 			return true;
 		}
 
-		if ( !$ignoreNamespaceCheck ) {
-			$allowedNamespaces = $config->get( 'ChatbotRagContentNamespaces' );
-			if ( !in_array( $title->getNamespace(), $allowedNamespaces ) ) {
-				return false;
-			}
+		if ( !$ignoreNamespaceCheck &&
+			!self::isAllowedNamespace( $title->getNamespace(), $config )
+		) {
+			return false;
 		}
 
-		return self::isTitleAllowedArticleType( $title );
+		return self::isTitleAllowedArticleType( $title, $config );
 	}
 
-	/**
-	 * @param Title $title
-	 * @return bool
-	 */
-	public static function isInWikiLanguage( Title $title ): bool {
-		$contentLanguage = MediaWikiServices::getInstance()->getContentLanguage();
+	public static function isInWikiLanguage( Title $title, Language $contentLanguage ): bool {
 		return ( $title->getPageLanguage()->getCode() === $contentLanguage->getCode() );
 	}
 
-	/**
-	 * Check if the configured allowed namespaces include the specified namespace
-	 *
-	 * @param int $namespaceId Namespace ID
-	 * @return bool
-	 */
-	public static function isAllowedNamespace( int $namespaceId ): bool {
-		$config = MediaWikiServices::getInstance()->getMainConfig();
+	public static function isAllowedNamespace( int $namespaceId, Config $config ): bool {
 		$allowedNamespaces = $config->get( 'ChatbotRagContentNamespaces' );
-		return in_array( $namespaceId, $allowedNamespaces );
+		return in_array( $namespaceId, $allowedNamespaces, true );
 	}
 
-	/**
-	 * Check if the article type is in a configured blocklist
-	 *
-	 * @param Title $title
-	 * @return bool
-	 */
-	public static function isTitleAllowedArticleType( Title $title ): bool {
+	public static function isTitleAllowedArticleType( Title $title, Config $config ): bool {
 		if ( !\ExtensionRegistry::getInstance()->isLoaded( 'ArticleType' ) ) {
 			return true;
 		}
 
 		$articleType = \MediaWiki\Extension\ArticleType\ArticleType::getArticleType( $title );
-		$config = MediaWikiServices::getInstance()->getMainConfig();
 		$blocklist = $config->get( 'ChatbotRagContentArticleTypeBlocklist' );
-		return !in_array( $articleType, (array)$blocklist );
+		return !in_array( $articleType, (array)$blocklist, true );
 	}
 }

@@ -4,10 +4,11 @@ namespace MediaWiki\Extension\ChatbotRagContent\Tests\Integration;
 
 use MediaWiki\Extension\ChatbotRagContent\RagUpdateJob;
 use MediaWiki\Http\HttpRequestFactory;
+use MediaWiki\Title\Title;
+use MediaWiki\Title\TitleFactory;
 use MediaWikiIntegrationTestCase;
 use MWHttpRequest;
 use Status;
-use Title;
 
 /**
  * @covers \MediaWiki\Extension\ChatbotRagContent\RagUpdateJob
@@ -18,19 +19,23 @@ class RagUpdateJobTest extends MediaWikiIntegrationTestCase {
 	protected function setUp(): void {
 		parent::setUp();
 
-		$this->setMwGlobals( [
-			'wgChatbotRagContentPingURL' => 'https://example.com/ping',
-			'wgServer' => 'https://wiki.example.com',
-			'wgRestPath' => '/rest.php'
+		$this->overrideConfigValues( [
+			'ChatbotRagContentPingURL' => 'https://example.com/ping',
+			'Server' => 'https://wiki.example.com',
+			'RestPath' => '/rest.php',
 		] );
 	}
 
+	private function getTitleFactory(): TitleFactory {
+		return $this->getServiceContainer()->getTitleFactory();
+	}
+
 	public function testJobUsesRevisionDataFromParamsForDeletion() {
-		$title = Title::makeTitle( NS_MAIN, 'TestPage' );
+		$title = $this->getTitleFactory()->makeTitle( NS_MAIN, 'TestPage' );
 		$params = [
 			'page_id' => 123,
 			'revision_id' => 456,
-			'revision_date' => '20231215120000'
+			'revision_date' => '20231215120000',
 		];
 
 		// Mock HTTP request
@@ -64,7 +69,7 @@ class RagUpdateJobTest extends MediaWikiIntegrationTestCase {
 	}
 
 	public function testJobFailsGracefullyWithInvalidRevisionData() {
-		$title = Title::makeTitle( NS_MAIN, 'DeletedPage' );
+		$title = $this->getTitleFactory()->makeTitle( NS_MAIN, 'DeletedPage' );
 
 		// Simulate a deleted page scenario where we can't get revision data
 		$params = [];
@@ -87,11 +92,11 @@ class RagUpdateJobTest extends MediaWikiIntegrationTestCase {
 	}
 
 	public function testJobFailsGracefullyWithZeroPageId() {
-		$title = Title::makeTitle( NS_MAIN, 'TestPage' );
+		$title = $this->getTitleFactory()->makeTitle( NS_MAIN, 'TestPage' );
 		$params = [
 			'page_id' => 0,
 			'revision_id' => 0,
-			'revision_date' => false
+			'revision_date' => false,
 		];
 
 		$job = new RagUpdateJob( $title, $params );
@@ -106,11 +111,11 @@ class RagUpdateJobTest extends MediaWikiIntegrationTestCase {
 	}
 
 	public function testJobHandlesHttpFailure() {
-		$title = Title::makeTitle( NS_MAIN, 'TestPage' );
+		$title = $this->getTitleFactory()->makeTitle( NS_MAIN, 'TestPage' );
 		$params = [
 			'page_id' => 123,
 			'revision_id' => 456,
-			'revision_date' => '20231215120000'
+			'revision_date' => '20231215120000',
 		];
 
 		// Mock HTTP request failure
@@ -138,7 +143,7 @@ class RagUpdateJobTest extends MediaWikiIntegrationTestCase {
 	public function testJobSucceedsWithValidData() {
 		// Create a real page
 		$this->insertPage( 'TestSuccessPage', 'Test content' );
-		$title = Title::newFromText( 'TestSuccessPage' );
+		$title = $this->getTitleFactory()->newFromText( 'TestSuccessPage' );
 
 		// Mock successful HTTP request
 		$mockRequest = $this->createMock( MWHttpRequest::class );
@@ -168,11 +173,11 @@ class RagUpdateJobTest extends MediaWikiIntegrationTestCase {
 	}
 
 	public function testJobIncludesCallbackUrl() {
-		$title = Title::makeTitle( NS_MAIN, 'TestPage' );
+		$title = $this->getTitleFactory()->makeTitle( NS_MAIN, 'TestPage' );
 		$params = [
 			'page_id' => 123,
 			'revision_id' => 456,
-			'revision_date' => '20231215120000'
+			'revision_date' => '20231215120000',
 		];
 
 		// Mock HTTP request

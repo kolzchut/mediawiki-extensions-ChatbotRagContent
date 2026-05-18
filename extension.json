@@ -8,9 +8,9 @@
 	"license-name": "GPL-2.0-or-later",
 	"type": "other",
 	"requires": {
-		"MediaWiki": ">= 1.35.0"
+		"MediaWiki": ">= 1.43.0"
 	},
-	"version": "0.0.3",
+	"version": "0.0.4",
 	"AutoloadNamespaces": {
 		"MediaWiki\\Extension\\ChatbotRagContent\\": "src/"
 	},
@@ -42,7 +42,14 @@
 	},
 	"HookHandlers": {
 		"ChatbotRagContentHooks": {
-			"class": "MediaWiki\\Extension\\ChatbotRagContent\\Hooks"
+			"class": "MediaWiki\\Extension\\ChatbotRagContent\\Hooks",
+			"services": [
+				"MainConfig",
+				"JobQueueGroup",
+				"TitleFactory",
+				"PageProps",
+				"ContentLanguage"
+			]
 		}
 	},
 	"Hooks": {
@@ -61,7 +68,12 @@
 			"class": "MediaWiki\\Extension\\ChatbotRagContent\\RestApiGetContent",
 			"services": [
 				"PermissionManager",
-				"RevisionRenderer"
+				"RevisionRenderer",
+				"TitleFactory",
+				"WikiPageFactory",
+				"PageProps",
+				"MainConfig",
+				"ContentLanguage"
 			]
 		}
 	],
