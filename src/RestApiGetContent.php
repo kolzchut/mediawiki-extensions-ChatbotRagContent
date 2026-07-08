@@ -18,7 +18,7 @@ use MediaWiki\Storage\RevisionRecord;
 use MediaWiki\Title\Title;
 use MediaWiki\Title\TitleFactory;
 use MWException;
-use PageProps;
+use MediaWiki\Page\PageProps;
 use Symfony\Component\CssSelector\CssSelectorConverter;
 use Wikimedia\Message\MessageValue;
 use Wikimedia\Message\ParamType;

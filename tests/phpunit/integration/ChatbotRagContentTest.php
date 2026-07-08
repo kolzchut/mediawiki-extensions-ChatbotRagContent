@@ -5,9 +5,9 @@ namespace MediaWiki\Extension\ChatbotRagContent\Tests\Integration;
 use Language;
 use MediaWiki\Config\Config;
 use MediaWiki\Extension\ChatbotRagContent\ChatbotRagContent;
+use MediaWiki\Page\PageProps;
 use MediaWiki\Title\Title;
 use MediaWikiIntegrationTestCase;
-use PageProps;
 
 /**
  * @covers \MediaWiki\Extension\ChatbotRagContent\ChatbotRagContent::isRelevantTitle

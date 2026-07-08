@@ -17,7 +17,7 @@ use MediaWiki\Page\Hook\PageDeletionDataUpdatesHook;
 use MediaWiki\Storage\Hook\RevisionDataUpdatesHook;
 use MediaWiki\Title\Title;
 use MediaWiki\Title\TitleFactory;
-use PageProps;
+use MediaWiki\Page\PageProps;
 
 class Hooks implements
 	RevisionDataUpdatesHook,

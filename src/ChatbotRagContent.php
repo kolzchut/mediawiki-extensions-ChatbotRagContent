@@ -5,7 +5,7 @@ namespace MediaWiki\Extension\ChatbotRagContent;
 use Language;
 use MediaWiki\Config\Config;
 use MediaWiki\Title\Title;
-use PageProps;
+use MediaWiki\Page\PageProps;
 
 class ChatbotRagContent {
 	public static function isRelevantTitle(
