@@ -10,7 +10,7 @@
 	"requires": {
 		"MediaWiki": ">= 1.43.0"
 	},
-	"version": "0.0.4",
+	"version": "0.0.5",
 	"AutoloadNamespaces": {
 		"MediaWiki\\Extension\\ChatbotRagContent\\": "src/"
 	},
@@ -38,6 +38,21 @@
 		"ChatbotRagContentTitleAllowlist": {
 			"description": "Array of page titles that should be included in content updates, overriding namespace restrictions",
 			"value": []
+		},
+		"ChatbotRagContentPingImmediateRetries": {
+			"description": "Extra pingback attempts made inside a single job run when the endpoint answers with a retriable status. Costs nothing from the job queue, so it works even where queued retries do not.",
+			"value": 1
+		},
+		"ChatbotRagContentPingImmediateRetryDelay": {
+			"description": "Seconds to pause between the in-run pingback attempts.",
+			"value": 2
+		},
+		"ChatbotRagContentPingRetryDelays": {
+			"description": "Backoff, in seconds, before each queued retry of a failed pingback. The number of entries is the retry ceiling; an empty array disables queued retries.",
+			"value": [
+				300,
+				1800
+			]
 		}
 	},
 	"HookHandlers": {
