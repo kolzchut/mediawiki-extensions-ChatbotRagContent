@@ -17,7 +17,7 @@ Kol-Zchut and Webix, and as such, the data format is probably not universally us
 | $wgChatbotRagContentTitleAllowlist	    | array of titles        | Titles that override namespace and article type restrictions |
 | $wgChatbotRagContentPingImmediateRetries | integer                | Extra pingback attempts within a single job run              |
 | $wgChatbotRagContentPingImmediateRetryDelay | seconds             | Pause between those in-run attempts                          |
-| $wgChatbotRagContentPingRetryDelays      | array of seconds       | Backoff before each queued retry; its length is the ceiling  |
+| $wgChatbotRagContentPingRetryDelays      | array of seconds       | Backoff before each queued retry (jittered); its length is the ceiling |
 
 ### $wgChatbotRagContentPingURL
 The data will be sent as JSON to the specified URL, in the following format:
@@ -44,9 +44,17 @@ job queue, which cannot tell a transient 500 from a permanent 404.
 A retriable failure is retried at once inside the same run
 (`$wgChatbotRagContentPingImmediateRetries`), and then, if it still fails, as a
 delayed copy of the job carrying the next attempt number
-(`$wgChatbotRagContentPingRetryDelays`). Queued retries need a job queue that
-supports delayed jobs; if the push is refused the job is returned to the queue
-as failed and the refusal is logged at `critical`.
+(`$wgChatbotRagContentPingRetryDelays`).
+
+Each queued delay is spread by ±10% before it is scheduled, so the default
+`[300, 1800]` ladder actually fires somewhere in 270–330s and then 1620–1980s.
+An outage fails every pingback in the window it lasts; without the spread all
+of those retries would re-fire on the same second and arrive at the recovering
+backend as one burst.
+
+Queued retries need a job queue that supports delayed jobs; if the push is
+refused the job is returned to the queue as failed and the refusal is logged at
+`critical`.
 
 Once the ceiling is reached — or immediately, on a terminal status — the job
 logs `RAG pingback abandoned` at `critical` on the `ChatbotRagContent` channel,
@@ -80,9 +88,9 @@ __EXCLUDE_FROM_RAG__
 ## Changelog
 
 ### 0.0.5
-- A failed pingback is now retried with a bounded backoff instead of being lost,
-  and a page that can never be delivered is reported at `critical` rather than
-  dropping silently out of the RAG index.
+- A failed pingback is now retried with a bounded, jittered backoff instead of
+  being lost, and a page that can never be delivered is reported at `critical`
+  rather than dropping silently out of the RAG index.
 
 ### 0.0.4
 - Modernized the hook and REST wiring to use explicit service injection instead of service-locator lookups.

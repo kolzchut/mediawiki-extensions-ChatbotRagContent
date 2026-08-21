@@ -11,6 +11,7 @@ use MediaWikiIntegrationTestCase;
 use MWHttpRequest;
 use Status;
 use TestLogger;
+use Wikimedia\Timestamp\ConvertibleTimestamp;
 
 /**
  * @covers \MediaWiki\Extension\ChatbotRagContent\RagUpdateJob
@@ -197,9 +198,9 @@ class RagUpdateJobTest extends MediaWikiIntegrationTestCase {
 			'The retry must carry the next attempt number'
 		);
 		$this->assertGreaterThanOrEqual(
-			$before + 300,
+			$before + 270,
 			$params['jobReleaseTimestamp'],
-			'The first retry must be delayed by the configured backoff'
+			'The first retry must be delayed by the configured backoff, less the jitter'
 		);
 		$this->assertNotSame(
 			$job->getDeduplicationInfo(),
@@ -365,5 +366,95 @@ class RagUpdateJobTest extends MediaWikiIntegrationTestCase {
 		$result = $job->run();
 
 		$this->assertTrue( $result, 'Job should include callback URL' );
+	}
+
+	/**
+	 * Build a job whose jitter is pinned to one edge of its window, so the
+	 * scheduled timestamp is exactly predictable.
+	 *
+	 * @param Title $title
+	 * @param array $params
+	 * @param bool $useMax Pin to the late edge rather than the early one
+	 * @return RagUpdateJob
+	 */
+	private function jobWithPinnedJitter( Title $title, array $params, bool $useMax ): RagUpdateJob {
+		return new class( $title, $params + [ 'testJitterUseMax' => $useMax ] ) extends RagUpdateJob {
+			/** @inheritDoc */
+			protected function randomInt( int $min, int $max ): int {
+				return $this->params['testJitterUseMax'] ? $max : $min;
+			}
+		};
+	}
+
+	public function testLastErrorIsClearedWhenALaterTrySucceeds() {
+		$title = $this->getTitleFactory()->makeTitle( NS_MAIN, 'TestPage' );
+		// First POST 500s, the immediate retry succeeds.
+		$this->mockHttpOutcomes( [ 500, null ] );
+		$this->captureQueuedJobs();
+
+		$job = new RagUpdateJob( $title, $this->pingParams() );
+
+		$this->assertTrue( $job->run(), 'A flaky 500 followed by a 200 is a success' );
+		$this->assertSame(
+			'',
+			$job->getLastError(),
+			'JobRunner reads getLastError() unconditionally, so a delivery that '
+				. 'recovered must not be reported to the runner as carrying an error'
+		);
+	}
+
+	public function testQueuedRetryIsJitteredSoAnOutageDoesNotSynchroniseTheLadder() {
+		$title = $this->getTitleFactory()->makeTitle( NS_MAIN, 'TestPage' );
+		// Freeze the clock so every difference below comes from the jitter alone.
+		ConvertibleTimestamp::setFakeTime( '20240101000000' );
+		$now = (int)ConvertibleTimestamp::time();
+
+		$delays = [];
+		for ( $i = 0; $i < 12; $i++ ) {
+			$this->mockHttpOutcomes( [ 500, 500 ] );
+			$pushed =& $this->captureQueuedJobs();
+
+			$job = new RagUpdateJob( $title, $this->pingParams() );
+			$job->run();
+
+			$delays[] = $pushed[0]->getParams()['jobReleaseTimestamp'] - $now;
+			unset( $pushed );
+		}
+
+		$this->assertGreaterThan(
+			1,
+			count( array_unique( $delays ) ),
+			'An outage fails every ping in the same window; their retries must not '
+				. 'all land on the same second'
+		);
+		$this->assertSame(
+			[],
+			array_values( array_filter(
+				$delays,
+				static fn ( $delay ) => $delay < 270 || $delay > 330
+			) ),
+			'Jitter must stay inside +/-10% of the configured 300s step'
+		);
+	}
+
+	public function testRetryJitterWindowEdgesAreExact() {
+		$title = $this->getTitleFactory()->makeTitle( NS_MAIN, 'TestPage' );
+		ConvertibleTimestamp::setFakeTime( '20240101000000' );
+		$now = (int)ConvertibleTimestamp::time();
+
+		foreach ( [ 270 => false, 330 => true ] as $expected => $useMax ) {
+			$this->mockHttpOutcomes( [ 500, 500 ] );
+			$pushed =& $this->captureQueuedJobs();
+
+			$job = $this->jobWithPinnedJitter( $title, $this->pingParams(), $useMax );
+			$job->run();
+
+			$this->assertSame(
+				$now + $expected,
+				$pushed[0]->getParams()['jobReleaseTimestamp'],
+				'Both edges of the jitter window must be exactly reachable'
+			);
+			unset( $pushed );
+		}
 	}
 }

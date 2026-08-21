@@ -27,6 +27,7 @@ use MediaWiki\MediaWikiServices;
 use MediaWiki\Title\Title;
 use Psr\Log\LoggerInterface;
 use Throwable;
+use Wikimedia\Timestamp\ConvertibleTimestamp;
 
 /**
  * Job to notify a remote server about page updates
@@ -47,7 +48,13 @@ class RagUpdateJob extends Job {
 	 * Job parameter holding the 1-based queued-attempt (cohort) number.
 	 *
 	 * Its presence also keeps a retry from being de-duplicated against the
-	 * original job: $removeDuplicates hashes the whole params array.
+	 * original job. $removeDuplicates hashes the params, but
+	 * getDeduplicationInfo() first strips the queue's own bookkeeping —
+	 * rootJobSignature, rootJobTimestamp, jobReleaseTimestamp and requestId.
+	 * The stripped jobReleaseTimestamp is precisely why this parameter has to
+	 * exist: the retry's delay is invisible to the hash, so without an attempt
+	 * number a retry would hash identically to the job that spawned it and be
+	 * silently dropped as a duplicate.
 	 */
 	public const ATTEMPT_PARAM = 'ragPingAttempt';
 
@@ -56,6 +63,14 @@ class RagUpdateJob extends Job {
 	 * "not now", not "never".
 	 */
 	private const RETRIABLE_CLIENT_ERRORS = [ 408, 425, 429 ];
+
+	/**
+	 * Fraction of the configured backoff by which a queued retry is spread,
+	 * either way. An outage fails every pingback in the same window; without a
+	 * spread their retries would all re-fire on the same second and hit the
+	 * recovering backend as one burst.
+	 */
+	private const RETRY_JITTER = 0.1;
 
 	/** @inheritDoc */
 	public function __construct( Title $title, array $params = [] ) {
@@ -166,6 +181,11 @@ class RagUpdateJob extends Job {
 			$status = $request->execute();
 
 			if ( $status->isOK() ) {
+				// An earlier try may have recorded an error. JobRunner reads
+				// getLastError() unconditionally, so leaving it set would
+				// report this recovered delivery as a run that also failed.
+				$this->setLastError( '' );
+
 				return null;
 			}
 
@@ -237,7 +257,7 @@ class RagUpdateJob extends Job {
 			return true;
 		}
 
-		$delay = $delays[$attempt - 1];
+		$delay = $this->jitter( $delays[$attempt - 1] );
 		$queued = $this->queueRetry( $services, $logger, $context, $attempt, $delay );
 		if ( !$queued ) {
 			// Re-queuing is the only thing standing between this page and
@@ -276,7 +296,7 @@ class RagUpdateJob extends Job {
 		// lands after a further edit notifies about the newer content.
 		$params = $this->getParams();
 		$params[self::ATTEMPT_PARAM] = $attempt + 1;
-		$params['jobReleaseTimestamp'] = time() + $delay;
+		$params['jobReleaseTimestamp'] = ConvertibleTimestamp::time() + $delay;
 
 		try {
 			// A queue that cannot hold a delayed job rejects this push. That is
@@ -292,6 +312,33 @@ class RagUpdateJob extends Job {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Spread a backoff step by +/-RETRY_JITTER so that pingbacks failed by one
+	 * outage do not all retry on the same second.
+	 *
+	 * @param int $delay Configured backoff in seconds
+	 * @return int Jittered backoff in seconds
+	 */
+	private function jitter( int $delay ): int {
+		$spread = (int)round( $delay * self::RETRY_JITTER );
+		if ( $spread < 1 ) {
+			return $delay;
+		}
+
+		return $delay + $this->randomInt( -$spread, $spread );
+	}
+
+	/**
+	 * Seam so tests can pin the jitter and assert an exact schedule.
+	 *
+	 * @param int $min
+	 * @param int $max
+	 * @return int
+	 */
+	protected function randomInt( int $min, int $max ): int {
+		return mt_rand( $min, $max );
 	}
 
 	/**
