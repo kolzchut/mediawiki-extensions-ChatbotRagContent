@@ -38,17 +38,28 @@ class RagUpdateJobTest extends MediaWikiIntegrationTestCase {
 	 * Build an HttpRequestFactory whose successive create() calls yield the
 	 * given HTTP outcomes. An outcome is null for success, or an int status.
 	 *
+	 * A 3xx outcome is modelled the way MWHttpRequest really reports one:
+	 * setStatus() maps 300-399 to an OK Status, and redirects are not followed.
+	 *
 	 * @param array $outcomes
 	 * @return HttpRequestFactory
 	 */
 	private function mockHttpOutcomes( array $outcomes ): HttpRequestFactory {
 		$requests = [];
 		foreach ( $outcomes as $outcome ) {
+			$isRedirect = $outcome !== null && $outcome >= 300 && $outcome < 400;
 			$request = $this->createMock( MWHttpRequest::class );
 			$request->method( 'execute' )->willReturn(
-				$outcome === null ? Status::newGood() : Status::newFatal( 'http-bad-status' )
+				$outcome === null || $isRedirect
+					? Status::newGood()
+					: Status::newFatal( 'http-bad-status' )
 			);
 			$request->method( 'getStatus' )->willReturn( $outcome === null ? 200 : $outcome );
+			$request->method( 'getResponseHeader' )->willReturnCallback(
+				static fn ( $header ) => $isRedirect && strtolower( $header ) === 'location'
+					? 'https://example.com/moved/ping'
+					: null
+			);
 			$requests[] = $request;
 		}
 
@@ -258,6 +269,146 @@ class RagUpdateJobTest extends MediaWikiIntegrationTestCase {
 		);
 		$this->assertCount( 1, $abandoned );
 		$this->assertSame( 'non-retriable-status', array_values( $abandoned )[0][2]['reason'] );
+	}
+
+	/**
+	 * @return array[]
+	 */
+	public static function provideRedirectStatuses(): array {
+		return [
+			'301' => [ 301 ],
+			'302' => [ 302 ],
+			'307' => [ 307 ],
+			'308' => [ 308 ],
+		];
+	}
+
+	/**
+	 * @dataProvider provideRedirectStatuses
+	 */
+	public function testRedirectIsNotReportedAsASuccessfulPingback( int $redirect ) {
+		$title = $this->getTitleFactory()->makeTitle( NS_MAIN, 'TestPage' );
+		// Both in-run tries must happen: a redirect is not a delivery.
+		$this->mockHttpOutcomes( [ $redirect, $redirect ] );
+		$pushed =& $this->captureQueuedJobs();
+
+		$logger = new TestLogger( true, null, true );
+		$this->setLogger( 'ChatbotRagContent', $logger );
+
+		$job = new RagUpdateJob( $title, $this->pingParams() );
+
+		$this->assertTrue( $job->run() );
+		$messages = array_column( $logger->getBuffer(), 1 );
+		$this->assertNotContains(
+			'Pingback to RAG endpoint successful',
+			$messages,
+			'The backend never processed a redirected notification'
+		);
+		$this->assertCount( 1, $pushed, 'A redirect is classified like any other failure, and retried' );
+
+		$failed = array_values( array_filter(
+			$logger->getBuffer(),
+			static fn ( $entry ) => $entry[1] === 'Pingback to RAG endpoint failed'
+		) );
+		$this->assertCount( 2, $failed );
+		$this->assertSame( $redirect, $failed[0][2]['status'], 'The real 3xx must be logged, not 0' );
+		$this->assertSame( 'https://example.com/moved/ping', $failed[0][2]['location'] );
+		$this->assertStringContainsString( "HTTP $redirect", $job->getLastError() );
+	}
+
+	public function testPersistentRedirectEndsInACriticalReport() {
+		$title = $this->getTitleFactory()->makeTitle( NS_MAIN, 'TestPage' );
+		$this->mockHttpOutcomes( [ 301, 301 ] );
+		$pushed =& $this->captureQueuedJobs();
+
+		$logger = new TestLogger( true, null, true );
+		$this->setLogger( 'ChatbotRagContent', $logger );
+
+		$params = $this->pingParams() + [ RagUpdateJob::ATTEMPT_PARAM => 3 ];
+		$job = new RagUpdateJob( $title, $params );
+
+		$this->assertTrue( $job->run() );
+		$this->assertSame( [], $pushed );
+		$abandoned = array_values( array_filter(
+			$logger->getBuffer(),
+			static fn ( $entry ) => $entry[1] === 'RAG pingback abandoned'
+		) );
+		$this->assertCount( 1, $abandoned, 'A redirect that never clears must surface, not stay silent' );
+		$this->assertSame( 'critical', $abandoned[0][0] );
+		$this->assertSame( 'retries-exhausted', $abandoned[0][2]['reason'] );
+		$this->assertSame( 301, $abandoned[0][2]['status'] );
+	}
+
+	/**
+	 * @return array[]
+	 */
+	public static function provideTransientClientErrors(): array {
+		return [
+			'404 during a rolling restart' => [ 404 ],
+			'403 from an auth blip' => [ 403 ],
+		];
+	}
+
+	/**
+	 * @dataProvider provideTransientClientErrors
+	 */
+	public function testTransientClientErrorIsRetried( int $httpStatus ) {
+		$title = $this->getTitleFactory()->makeTitle( NS_MAIN, 'TestPage' );
+		// Two requests: the status must be retried in-run as well.
+		$this->mockHttpOutcomes( [ $httpStatus, $httpStatus ] );
+		$pushed =& $this->captureQueuedJobs();
+
+		$logger = new TestLogger( true, null, true );
+		$this->setLogger( 'ChatbotRagContent', $logger );
+
+		$job = new RagUpdateJob( $title, $this->pingParams() );
+
+		$this->assertTrue( $job->run() );
+		$this->assertCount( 1, $pushed, "A $httpStatus must not abandon the page at once" );
+		$this->assertSame( [], array_filter(
+			$logger->getBuffer(),
+			static fn ( $entry ) => $entry[1] === 'RAG pingback abandoned'
+		) );
+	}
+
+	/**
+	 * @dataProvider provideTransientClientErrors
+	 */
+	public function testTransientClientErrorRecoversInRun( int $httpStatus ) {
+		$title = $this->getTitleFactory()->makeTitle( NS_MAIN, 'TestPage' );
+		$this->mockHttpOutcomes( [ $httpStatus, null ] );
+		$pushed =& $this->captureQueuedJobs();
+
+		$job = new RagUpdateJob( $title, $this->pingParams() );
+
+		$this->assertTrue( $job->run() );
+		$this->assertSame( [], $pushed );
+		$this->assertSame( '', $job->getLastError() );
+	}
+
+	/**
+	 * @return array[]
+	 */
+	public static function provideRejectionStatuses(): array {
+		return [
+			'400' => [ 400 ],
+			'413' => [ 413 ],
+		];
+	}
+
+	/**
+	 * @dataProvider provideRejectionStatuses
+	 */
+	public function testRejectionStatusStaysTerminal( int $httpStatus ) {
+		$title = $this->getTitleFactory()->makeTitle( NS_MAIN, 'TestPage' );
+		$this->mockHttpOutcomes( [ $httpStatus ] );
+		$pushed =& $this->captureQueuedJobs();
+
+		$job = new RagUpdateJob( $title, $this->pingParams() );
+
+		$this->assertTrue( $job->run() );
+		$this->assertSame( [], $pushed, 'An identical payload cannot become acceptable' );
+		$this->assertStringContainsString( 'not retriable', $job->getLastError() );
 	}
 
 	public function testSucceedsOnALaterAttempt() {

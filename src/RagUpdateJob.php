@@ -37,7 +37,7 @@ use Wikimedia\Timestamp\ConvertibleTimestamp;
  * nothing else ever re-sends it, so the page's RAG content stays stale until
  * somebody happens to edit it again. This job therefore owns its own bounded
  * retry rather than delegating failure to the job queue, which cannot tell a
- * transient 500 from a permanent 404 and — with `daemonized` JobQueueRedis —
+ * transient 500 from a permanent 400 and — with `daemonized` JobQueueRedis —
  * cannot be relied upon to re-run a failed job at all.
  *
  * @ingroup JobQueue
@@ -59,10 +59,18 @@ class RagUpdateJob extends Job {
 	public const ATTEMPT_PARAM = 'ragPingAttempt';
 
 	/**
-	 * 4xx statuses that are worth retrying anyway: the server is telling us
-	 * "not now", not "never".
+	 * 4xx statuses that are worth retrying anyway.
+	 *
+	 * 408, 425 and 429 are the server saying "not now", not "never". 403 and
+	 * 404 are here for a different reason: from this endpoint they are far
+	 * more likely to be a transient condition — a proxy answering before the
+	 * backend's routes register during a rolling restart, or an auth blip —
+	 * than a considered rejection of the notification. The retry ceiling is
+	 * small, and a page that still gets one after it is reported at critical
+	 * all the same, so treating them as terminal buys nothing but the risk of
+	 * abandoning a page over a blip.
 	 */
-	private const RETRIABLE_CLIENT_ERRORS = [ 408, 425, 429 ];
+	private const RETRIABLE_CLIENT_ERRORS = [ 403, 404, 408, 425, 429 ];
 
 	/**
 	 * Fraction of the configured backoff by which a queued retry is spread,
@@ -179,8 +187,12 @@ class RagUpdateJob extends Job {
 				] );
 			$request->setHeader( 'Content-Type', 'application/json' );
 			$status = $request->execute();
+			$responseStatus = (int)$request->getStatus();
 
-			if ( $status->isOK() ) {
+			// MWHttpRequest reports a 3xx as OK, and redirects are not
+			// followed, so a redirect would otherwise be logged as a delivery
+			// the backend never actually received.
+			if ( $status->isOK() && $responseStatus < 300 ) {
 				// An earlier try may have recorded an error. JobRunner reads
 				// getLastError() unconditionally, so leaving it set would
 				// report this recovered delivery as a run that also failed.
@@ -189,13 +201,26 @@ class RagUpdateJob extends Job {
 				return null;
 			}
 
-			$httpStatus = $this->normaliseStatus( (int)$request->getStatus() );
-			$this->setLastError(
-				'HTTP request to RAG endpoint failed: ' . $status->getMessage()->text()
-			);
-			$logger->error( 'Pingback to RAG endpoint failed', [
+			$context = [
 				'page_title' => $this->getTitle()->getPrefixedText(),
 				'url' => $url,
+			];
+			if ( $status->isOK() ) {
+				// A response the backend chose to send, just not a success:
+				// keep its real status, and say where it pointed.
+				$httpStatus = $responseStatus;
+				$this->setLastError(
+					"HTTP request to RAG endpoint was answered with HTTP $httpStatus, "
+						. 'which is not a delivery (redirects are not followed)'
+				);
+				$context['location'] = $request->getResponseHeader( 'Location' );
+			} else {
+				$httpStatus = $this->normaliseStatus( $responseStatus );
+				$this->setLastError(
+					'HTTP request to RAG endpoint failed: ' . $status->getMessage()->text()
+				);
+			}
+			$logger->error( 'Pingback to RAG endpoint failed', $context + [
 				'status' => $httpStatus,
 				'attempt' => $attempt,
 				'immediate_try' => $try + 1,
@@ -378,7 +403,9 @@ class RagUpdateJob extends Job {
 	 *
 	 * Anything we cannot positively identify as a rejection is retriable: the
 	 * cost of one extra POST is trivial next to a page silently dropping out
-	 * of the RAG index.
+	 * of the RAG index. That includes a 3xx: a redirect is not a rejection of
+	 * the notification, and if it persists the ladder ends in the same
+	 * critical `retries-exhausted` report as any other lasting failure.
 	 *
 	 * @param int $httpStatus
 	 * @return bool
