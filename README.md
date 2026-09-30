@@ -33,13 +33,21 @@ The data will be sent as JSON to the specified URL, in the following format:
 A pingback that is not delivered is not merely late: nothing else re-sends it,
 so the page's RAG content stays stale until somebody happens to edit it again.
 The job therefore owns its own bounded retry instead of leaving failure to the
-job queue, which cannot tell a transient 500 from a permanent 404.
+job queue, which cannot tell a transient 500 from a permanent 400.
 
-* **Retriable** — 5xx, 408, 425, 429, and any failure with no usable HTTP status
-  (DNS, connect timeout, TLS). Anything that cannot be positively identified as
-  a rejection counts as retriable.
-* **Terminal** — every other 4xx. The backend has rejected the notification
-  itself, and an identical request can only be rejected again.
+* **Success** — 2xx only. Redirects are not followed, so a 3xx means the
+  backend never processed the notification; it is logged as a failed attempt
+  (with its `location`) rather than as a delivery.
+* **Retriable** — 5xx, 3xx, 403, 404, 408, 425, 429, and any failure with no
+  usable HTTP status (DNS, connect timeout, TLS). Anything that cannot be
+  positively identified as a rejection counts as retriable. 403 and 404 are in
+  this set because, from this endpoint, they are far likelier to be a rolling
+  restart or an auth blip than a considered rejection.
+* **Terminal** — every other 4xx (400, 413, …). The backend has rejected the
+  notification itself, and an identical request can only be rejected again.
+
+A `Retry-After` header on a 429 is not honoured: the retry follows the fixed
+ladder below regardless.
 
 A retriable failure is retried at once inside the same run
 (`$wgChatbotRagContentPingImmediateRetries`), and then, if it still fails, as a
@@ -86,6 +94,11 @@ __EXCLUDE_FROM_RAG__
 ```
 
 ## Changelog
+
+### 0.0.6
+- A 3xx answer to a pingback is no longer logged as a successful delivery; it
+  is retried and, if it persists, reported like any other lasting failure.
+- 403 and 404 are now retried rather than abandoning the page at once.
 
 ### 0.0.5
 - A failed pingback is now retried with a bounded, jittered backoff instead of
