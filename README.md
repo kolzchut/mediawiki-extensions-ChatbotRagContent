@@ -18,6 +18,15 @@ Kol-Zchut and Webix, and as such, the data format is probably not universally us
 | $wgChatbotRagContentPingImmediateRetries | integer                | Extra pingback attempts within a single job run              |
 | $wgChatbotRagContentPingImmediateRetryDelay | seconds             | Pause between those in-run attempts                          |
 | $wgChatbotRagContentPingRetryDelays      | array of seconds       | Backoff before each queued retry (jittered); its length is the ceiling |
+| $wgChatbotRagContentExcludedSelectors    | array of CSS selectors | Elements stripped from the content served to the RAG          |
+
+### $wgChatbotRagContentExcludedSelectors
+Elements matching any of these selectors are removed from `content` and
+`contentHtml` (`.article-summary` is always extracted into `summary` and
+removed separately). See `extension.json` for the default list.
+
+Setting the variable **replaces** the default list, so copy the defaults if you
+only want to add to it.
 
 ### $wgChatbotRagContentPingURL
 The data will be sent as JSON to the specified URL, in the following format:
@@ -94,6 +103,11 @@ __EXCLUDE_FROM_RAG__
 ```
 
 ## Changelog
+
+### 0.0.7
+- The list of elements stripped from RAG content is now configurable
+  (`$wgChatbotRagContentExcludedSelectors`), and by default includes everything
+  marked `.noprint` - which drops the "preferred source" call to action.
 
 ### 0.0.6
 - A 3xx answer to a pingback is no longer logged as a successful delivery; it

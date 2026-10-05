@@ -10,7 +10,7 @@
 	"requires": {
 		"MediaWiki": ">= 1.43.0"
 	},
-	"version": "0.0.6",
+	"version": "0.0.7",
 	"AutoloadNamespaces": {
 		"MediaWiki\\Extension\\ChatbotRagContent\\": "src/"
 	},
@@ -46,6 +46,16 @@
 		"ChatbotRagContentPingImmediateRetryDelay": {
 			"description": "Seconds to pause between the in-run pingback attempts.",
 			"value": 2
+		},
+		"ChatbotRagContentExcludedSelectors": {
+			"description": "CSS selectors of elements stripped from the page HTML before it is served as RAG content. Setting this replaces the default list rather than adding to it.",
+			"value": [
+				".noprint",
+				".share-links",
+				".toc-box",
+				".maps-map"
+			],
+			"merge_strategy": "provide_default"
 		},
 		"ChatbotRagContentPingRetryDelays": {
 			"description": "Backoff, in seconds, before each queued retry of a failed pingback. Each delay is jittered by \u00b110% so that pingbacks failed by one outage do not all retry on the same second. The number of entries is the retry ceiling; an empty array disables queued retries.",

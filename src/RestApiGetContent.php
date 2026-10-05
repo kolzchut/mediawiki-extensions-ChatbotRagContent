@@ -305,13 +305,10 @@ class RestApiGetContent extends SimpleHandler {
 		// Remove the summary from the document
 		$this->removeElementsBySelector( '.article-summary' );
 
-		$this->removeElementsBySelector( '.share-links' );
-
-		// Remove other useless elements
-		$this->removeElementsBySelector( '.toc-box' );
-
-		// Remove maps - rare, probably only a single page, but still annoying
-		$this->removeElementsBySelector( '.maps-map' );
+		// Remove page furniture that isn't article content (share links, calls to action, maps...)
+		foreach ( $this->config->get( 'ChatbotRagContentExcludedSelectors' ) as $selector ) {
+			$this->removeElementsBySelector( $selector );
+		}
 
 		$this->removeEmptyElements();
 
