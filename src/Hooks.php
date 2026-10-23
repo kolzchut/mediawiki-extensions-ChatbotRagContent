@@ -98,9 +98,10 @@ class Hooks implements
 
 	/** @inheritDoc */
 	public function onParserAfterParse( $parser, &$text, $stripState ) {
-		// Check if the property exists and is not false
-		// getProperty() returns false when property doesn't exist (not null)
-		if ( $parser->getOutput()->getPageProperty( 'exclude_from_rag' ) !== false ) {
+		// ParserOutput::getPageProperty() returns null when the property is not set.
+		// The behaviour switch stores an empty string, so test against null rather
+		// than for truthiness.
+		if ( $parser->getOutput()->getPageProperty( 'exclude_from_rag' ) !== null ) {
 			$parser->addTrackingCategory( 'chatbotragcontent-tracking-category-exclude-from-rag' );
 		}
 	}
