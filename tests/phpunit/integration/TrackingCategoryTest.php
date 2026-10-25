@@ -21,7 +21,6 @@ class TrackingCategoryTest extends MediaWikiIntegrationTestCase {
 		parent::setUp();
 
 		$this->overrideConfigValues( [
-			'LanguageCode' => 'en',
 			// The hooks must not try to ping anything while parsing.
 			'ChatbotRagContentPingURL' => '',
 		] );
